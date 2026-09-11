@@ -203,7 +203,8 @@ def trigger_automatic_checkout_completion_task():
             )
 
 
-@app.task(
+# celery-types declares queue as str, but Celery accepts None (default queue)
+@app.task(  # type: ignore[call-overload]
     queue=settings.AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME,
     bind=True,
     default_retry_delay=60,
@@ -312,7 +313,8 @@ def automatic_checkout_completion_task(
 
 
 @app.task(
-    queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,
+    # celery-types declares queue as str, but Celery accepts None (default queue)
+    queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,  # type: ignore[arg-type]
     expires=settings.BEAT_UPDATE_SEARCH_EXPIRE_AFTER_SEC,
 )
 def update_checkouts_search_vector_task():

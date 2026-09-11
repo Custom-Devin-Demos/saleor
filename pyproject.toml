@@ -86,6 +86,7 @@ Documentation = "https://docs.saleor.io/"
 
 [dependency-groups]
 dev = [
+    "celery-types>=0.26.0,<1",
     "coverage~=7.14",
     "deptry>=0.23.0,<0.24",
     "django-extensions~=4.1",

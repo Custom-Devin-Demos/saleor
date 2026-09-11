@@ -13,7 +13,7 @@ task_logger = get_task_logger(__name__)
 
 @app.task
 @allow_writer()
-def delete_empty_allocations_task():
+def delete_empty_allocations_task() -> None:
     ids_to_delete = list(
         Allocation.objects.filter(quantity_allocated=0).values_list("id", flat=True)
     )
@@ -24,7 +24,7 @@ def delete_empty_allocations_task():
 
 @app.task
 @allow_writer()
-def delete_expired_reservations_task():
+def delete_expired_reservations_task() -> None:
     stock_reservations, _ = Reservation.objects.filter(
         reserved_until__lt=timezone.now()
     ).delete()
@@ -42,8 +42,8 @@ def delete_expired_reservations_task():
 
 @app.task
 @allow_writer()
-def update_stocks_quantity_allocated_task():
-    stocks_to_update = []
+def update_stocks_quantity_allocated_task() -> None:
+    stocks_to_update: list[Stock] = []
     for mismatched_stock in Stock.objects.annotate(
         allocations_allocated=Coalesce(Sum("allocations__quantity_allocated"), 0)
     ).exclude(quantity_allocated=F("allocations_allocated")):

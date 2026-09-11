@@ -447,8 +447,10 @@ def trigger_webhooks_async_for_multiple_objects(
                 "send_webhook_queue": queue,
                 "telemetry_context": get_task_context().to_dict(),
             },
-            MessageGroupId=message_group_id,
-            queue=settings.WEBHOOK_DEFERRED_PAYLOAD_QUEUE_NAME,
+            # celery-types omits Celery's pass-through **options (SQS MessageGroupId)
+            MessageGroupId=message_group_id,  # type: ignore[call-arg]
+            # celery-types declares queue as str, but Celery accepts None (default queue)
+            queue=settings.WEBHOOK_DEFERRED_PAYLOAD_QUEUE_NAME,  # type: ignore[arg-type]
         )
 
     def process_deliveries(deliveries_list):
@@ -475,17 +477,17 @@ def trigger_webhooks_async_for_multiple_objects(
 
 
 def trigger_webhooks_async(
-    data,  # deprecated, legacy_data_generator should be used instead
-    event_type,
+    data: str | None,  # deprecated, legacy_data_generator should be used instead
+    event_type: str,
     webhooks,
     subscribable_object=None,
     requestor=None,
-    legacy_data_generator=None,
-    allow_replica=False,
+    legacy_data_generator: Callable[[], str] | None = None,
+    allow_replica: bool = False,
     pre_save_payloads=None,
     request_time=None,
     queue=None,
-):
+) -> None:
     """Trigger async webhooks - both regular and subscription.
 
     :param data: used as payload in regular webhooks.
@@ -596,7 +598,8 @@ def generate_deferred_payloads(
                     **request_kwargs,
                     "event_delivery_ids": list(missing_delivery_pks),
                 },
-                MessageGroupId=message_group_id,
+                # celery-types omits Celery's pass-through **options (SQS MessageGroupId)
+                MessageGroupId=message_group_id,  # type: ignore[call-arg]
             )
 
         _generate_deferred_payloads(
@@ -758,7 +761,8 @@ def _reconstruct_subscribable_object(
         ) from e
 
 
-@app.task(
+# celery-types declares queue as str, but Celery accepts None (default queue)
+@app.task(  # type: ignore[call-overload]
     queue=settings.WEBHOOK_CELERY_QUEUE_NAME,
     bind=True,
     retry_backoff=10,
@@ -843,7 +847,8 @@ def send_webhook_request_async(
     clear_successful_delivery(delivery)
 
 
-@app.task(
+# celery-types declares queue as str, but Celery accepts None (default queue)
+@app.task(  # type: ignore[call-overload]
     queue=settings.WEBHOOK_CELERY_QUEUE_NAME,
     bind=True,
 )

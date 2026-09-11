@@ -448,7 +448,7 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
     def get_ordering_queryset(self):
         return self.product.variants.all()
 
-    def is_preorder_active(self):
+    def is_preorder_active(self) -> bool:
         return self.is_preorder and (
             self.preorder_end_date is None or timezone.now() <= self.preorder_end_date
         )

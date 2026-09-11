@@ -310,7 +310,8 @@ def mark_products_search_vector_as_dirty(product_ids: list[int]):
 
 
 @app.task(
-    queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,
+    # celery-types declares queue as str, but Celery accepts None (default queue)
+    queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,  # type: ignore[arg-type]
     expires=settings.BEAT_UPDATE_SEARCH_EXPIRE_AFTER_SEC,
 )
 def update_products_search_vector_task():
@@ -324,7 +325,10 @@ def update_products_search_vector_task():
         update_products_search_vector(products)
 
 
-@app.task(queue=settings.COLLECTION_PRODUCT_UPDATED_QUEUE_NAME)
+@app.task(
+    # celery-types declares queue as str, but Celery accepts None (default queue)
+    queue=settings.COLLECTION_PRODUCT_UPDATED_QUEUE_NAME,  # type: ignore[arg-type]
+)
 @allow_writer()
 def collection_product_updated_task(product_ids):
     manager = get_plugins_manager(allow_replica=True)
@@ -360,7 +364,8 @@ def on_failure_fetch_product_media_image_task(self, exc, task_id, args, kwargs, 
 
 
 @app.task(
-    queue=settings.FETCH_IMAGES_QUEUE_NAME,
+    # celery-types declares queue as str, but Celery accepts None (default queue)
+    queue=settings.FETCH_IMAGES_QUEUE_NAME,  # type: ignore[arg-type]
     max_retries=5,
     retry_backoff=True,
     default_retry_delay=1,

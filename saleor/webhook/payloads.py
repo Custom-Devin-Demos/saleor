@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import asdict
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 import graphene
 from django.contrib.sites.models import Site
@@ -961,12 +961,19 @@ def generate_fulfillment_payload(
     if fulfillment_line and fulfillment_line.stock:
         warehouse = fulfillment_line.stock.warehouse
     else:
+        # The payload assumes a warehouse exists here; `first()` is typed as
+        # optional, so the cast keeps the existing behaviour unchanged.
         if calculate_stocks_with_shipping_zones:
-            warehouse = Warehouse.objects.for_country_and_channel(
-                order_country, order.channel_id
-            ).first()
+            warehouse = cast(
+                Warehouse,
+                Warehouse.objects.for_country_and_channel(
+                    order_country, order.channel_id
+                ).first(),
+            )
         else:
-            warehouse = Warehouse.objects.for_channel(order.channel_id).first()
+            warehouse = cast(
+                Warehouse, Warehouse.objects.for_channel(order.channel_id).first()
+            )
     fulfillment_data = serializer.serialize(
         [fulfillment],
         fields=fulfillment_fields,

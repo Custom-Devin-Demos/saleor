@@ -1150,10 +1150,10 @@ def _create_fulfillment_lines(
     )
 
     variant_to_stock: dict[int, list[Stock]] = defaultdict(list)
-    for stock in stocks:
-        variant_to_stock[stock.product_variant_id].append(stock)
+    for variant_stock in stocks:
+        variant_to_stock[variant_stock.product_variant_id].append(variant_stock)
 
-    insufficient_stocks = []
+    insufficient_stocks: list[InsufficientStockData] = []
     fulfillment_lines = []
     lines_info = []
     for line in lines_data:
@@ -1161,7 +1161,7 @@ def _create_fulfillment_lines(
         order_line = line["order_line"]
         if quantity > 0:
             variant = order_line.variant
-            stock = None
+            stock: Stock | None = None
             if variant:
                 line_stocks = variant_to_stock.get(variant.id)
                 stock = line_stocks[0] if line_stocks else None

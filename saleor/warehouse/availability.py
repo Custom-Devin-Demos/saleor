@@ -13,11 +13,11 @@ from django.core.exceptions import ValidationError
 from django.db.models import F, QuerySet, Sum
 from django.db.models.functions import Coalesce
 
+from ..checkout.delivery_context import DeliveryMethodBase
 from ..checkout.error_codes import CheckoutErrorCode
-from ..checkout.fetch import DeliveryMethodBase
 from ..core.exceptions import InsufficientStock, InsufficientStockData
 from ..product.models import ProductVariantChannelListing
-from .models import Reservation, Stock, StockQuerySet
+from .models import Reservation, Stock, StockQuerySet, StockWithAvailableQuantity
 from .reservations import get_listings_reservations
 
 if TYPE_CHECKING:
@@ -49,8 +49,8 @@ def _get_available_quantity(
         total_quantity=Coalesce(Sum("quantity", distinct=True), 0),
         quantity_allocated=Coalesce(Sum("allocations__quantity_allocated"), 0),
     )
-    total_quantity = results["total_quantity"]
-    quantity_allocated = results["quantity_allocated"]
+    total_quantity: int = results["total_quantity"]
+    quantity_allocated: int = results["quantity_allocated"]
 
     if check_reservations:
         quantity_reserved = get_reserved_stock_quantity(stocks, checkout_lines)
@@ -71,7 +71,7 @@ def check_stock_and_preorder_quantity(
     check_reservations: bool = False,
     order_line: Optional["OrderLine"] = None,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     """Validate if there is stock/preorder available for given variant.
 
     :raises InsufficientStock: when there is not enough items in stock for a variant
@@ -111,7 +111,7 @@ def check_stock_quantity(
     check_reservations: bool = False,
     order_line: Optional["OrderLine"] = None,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     """Validate if there is stock available for given variant in given channel.
 
     If so - returns None. If there is less stock then required raise InsufficientStock
@@ -159,7 +159,7 @@ def check_stock_and_preorder_quantity_bulk(
     existing_lines: list["CheckoutLineInfo"] | None = None,
     replace: bool = False,
     check_reservations: bool = False,
-):
+) -> None:
     """Validate if products are available for stocks/preorder.
 
     :raises InsufficientStock: when there is not enough items in stock for a variant
@@ -252,15 +252,17 @@ def check_stock_quantity_bulk(
     delivery_method_info: Optional["DeliveryMethodBase"] = None,
     additional_filter_lookup: dict[str, Any] | None = None,
     existing_lines: list["CheckoutLineInfo"] | None = None,
-    replace=False,
+    replace: bool = False,
     check_reservations: bool = False,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     """Validate if there is stock available for given variants in given country.
 
     :raises InsufficientStock: when there is not enough items in stock for a variant.
     """
-    filter_lookup = {"product_variant__in": variants}
+    # Any: the lookup is forwarded to `QuerySet.filter(**kwargs)`, whose values
+    # depend on the caller-provided lookup keys.
+    filter_lookup: dict[str, Any] = {"product_variant__in": variants}
     if additional_filter_lookup is not None:
         filter_lookup.update(additional_filter_lookup)
 
@@ -276,7 +278,7 @@ def check_stock_quantity_bulk(
         collection_point = (
             delivery_method_info.warehouse_pk if delivery_method_info else None
         )
-        stocks = (
+        stocks_qs = (
             Stock.objects.using(
                 database_connection_name
             ).for_channel_and_click_and_collect(channel_slug)
@@ -289,14 +291,18 @@ def check_stock_quantity_bulk(
             )
         )
     else:
-        stocks = Stock.objects.using(database_connection_name).for_channel_or_country(
+        stocks_qs = Stock.objects.using(
+            database_connection_name
+        ).for_channel_or_country(
             channel_slug,
             include_shipping_zones=include_shipping_zones,
         )
 
-    all_variants_stocks = stocks.filter(**filter_lookup).annotate_available_quantity()
+    all_variants_stocks = stocks_qs.filter(
+        **filter_lookup
+    ).annotate_available_quantity()
 
-    variant_stocks: dict[int, list[Stock]] = defaultdict(list)
+    variant_stocks: dict[int, list[StockWithAvailableQuantity]] = defaultdict(list)
     for stock in all_variants_stocks:
         variant_stocks[stock.product_variant_id].append(stock)
 
@@ -317,7 +323,7 @@ def check_stock_quantity_bulk(
             quantity += variants_quantities.get(variant.pk, 0)
 
         stocks = variant_stocks.get(variant.pk, [])
-        available_quantity = sum([stock.available_quantity for stock in stocks])  # type: ignore[attr-defined]
+        available_quantity = sum([stock.available_quantity for stock in stocks])
         available_quantity = max(
             available_quantity - variant_reservations[variant.pk], 0
         )
@@ -397,7 +403,7 @@ def check_preorder_threshold_in_orders(
     checkout_lines: Iterable["CheckoutLine"] | None,
     check_reservations: bool,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     """Validate if there is preorder available for given variants in given country.
 
     It is used in orders, since it does not need additional logic related to limits.
@@ -470,7 +476,7 @@ def check_preorder_threshold_bulk(
     existing_lines: list["CheckoutLineInfo"] | None = None,
     replace: bool = False,
     check_reservations: bool = False,
-):
+) -> None:
     """Validate if there is enough preordered variants according to thresholds.
 
     :raises InsufficientStock: when there is not enough available items for a variant.
@@ -591,7 +597,8 @@ def get_reserved_stock_quantity(
         )
     )
 
-    return result["quantity_reserved"]
+    quantity_reserved: int = result["quantity_reserved"]
+    return quantity_reserved
 
 
 def get_reserved_stock_quantity_bulk(
