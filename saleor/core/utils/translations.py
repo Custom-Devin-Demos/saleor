@@ -1,4 +1,5 @@
 from typing import Any
+from uuid import UUID
 
 from django.conf import settings
 from django.db import models
@@ -33,7 +34,7 @@ class Translation(models.Model):
     class Meta:
         abstract = True
 
-    def get_translated_object_id(self) -> tuple[str, int | str]:
+    def get_translated_object_id(self) -> tuple[str, int | str | UUID]:
         raise NotImplementedError(
             "Models extending Translation should implement get_translated_object_id"
         )

@@ -79,7 +79,7 @@ def fetch_order_lines(order: "Order") -> list[OrderLineInfo]:
 
 
 @dataclass
-class EditableOrderLineInfo(LineInfo):
+class EditableOrderLineInfo(LineInfo["OrderLineDiscount"]):
     line: "OrderLine"
     discounts: list["OrderLineDiscount"]
     rules_info: list["VariantPromotionRuleInfo"] | None = None

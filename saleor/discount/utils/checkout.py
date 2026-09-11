@@ -1,5 +1,6 @@
 import datetime
-from typing import TYPE_CHECKING
+from decimal import Decimal
+from typing import TYPE_CHECKING, TypedDict
 
 from django.conf import settings
 from django.db import transaction
@@ -8,12 +9,13 @@ from ...checkout.base_calculations import (
     base_checkout_delivery_price,
     base_checkout_subtotal,
 )
-from ...checkout.models import Checkout
+from ...checkout.models import Checkout, CheckoutLine
 from ...core.db.connection import allow_writer
 from .. import DiscountType
 from ..models import (
     CheckoutDiscount,
     CheckoutLineDiscount,
+    PromotionRule,
 )
 from .promotion import (
     _get_rule_discount_amount,
@@ -31,11 +33,25 @@ if TYPE_CHECKING:
     from ...checkout.fetch import CheckoutInfo, CheckoutLineInfo
 
 
+class CheckoutLineDiscountInput(TypedDict):
+    line: CheckoutLine
+    type: str
+    value_type: str | None
+    value: Decimal | None
+    amount_value: Decimal
+    currency: str
+    name: str
+    translated_name: str | None
+    reason: str
+    promotion_rule: PromotionRule
+    unique_type: str
+
+
 def create_or_update_discount_objects_from_promotion_for_checkout(
     checkout_info: "CheckoutInfo",
     lines_info: list["CheckoutLineInfo"],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> datetime.datetime | None:
     soonest_catalogue_promotion_end_date = (
         create_checkout_line_discount_objects_for_catalogue_promotions(lines_info)
     )
@@ -64,7 +80,7 @@ def create_checkout_line_discount_objects_for_catalogue_promotions(
         soonest_end_date,
     ) = discount_data
 
-    new_line_discounts = []
+    new_line_discounts: list[CheckoutLineDiscount] = []
     with allow_writer():
         with transaction.atomic():
             # Protect against potential thread race. CheckoutLine object can have only
@@ -105,7 +121,7 @@ def prepare_checkout_line_discount_objects_for_catalogue_promotions(
     lines_info: list["CheckoutLineInfo"],
 ) -> (
     tuple[
-        list[dict],
+        list[CheckoutLineDiscountInput],
         list[CheckoutLineDiscount],
         list[CheckoutLineDiscount],
         list[str],
@@ -113,12 +129,12 @@ def prepare_checkout_line_discount_objects_for_catalogue_promotions(
     ]
     | None
 ):
-    line_discounts_to_create_inputs: list[dict] = []
+    line_discounts_to_create_inputs: list[CheckoutLineDiscountInput] = []
     line_discounts_to_update: list[CheckoutLineDiscount] = []
     line_discounts_to_remove: list[CheckoutLineDiscount] = []
     updated_fields: list[str] = []
     soonest_end_date = None
-    applied_promotions_end_dates = []
+    applied_promotions_end_dates: list[datetime.datetime] = []
 
     if not lines_info:
         return None
@@ -172,7 +188,7 @@ def prepare_checkout_line_discount_objects_for_catalogue_promotions(
             translated_name = get_discount_translated_name(rule_info)
             reason = prepare_promotion_discount_reason(rule_info.promotion)
             if not discount_to_update:
-                line_discount_input = {
+                line_discount_input: CheckoutLineDiscountInput = {
                     "line": line,
                     "type": DiscountType.PROMOTION,
                     "value_type": rule.reward_value_type,
@@ -217,7 +233,7 @@ def create_checkout_discount_objects_for_order_promotions(
     *,
     save: bool = False,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> datetime.datetime | None:
     # The base prices are required for order promotion discount qualification.
     _set_checkout_base_prices(checkout_info, lines_info)
 
@@ -261,7 +277,9 @@ def create_checkout_discount_objects_for_order_promotions(
     return promotion_end_date
 
 
-def _set_checkout_base_prices(checkout_info, lines_info):
+def _set_checkout_base_prices(
+    checkout_info: "CheckoutInfo", lines_info: list["CheckoutLineInfo"]
+) -> None:
     """Set base checkout prices that includes only catalogue discounts."""
     checkout = checkout_info.checkout
     subtotal = base_checkout_subtotal(
@@ -283,7 +301,7 @@ def _set_checkout_base_prices(checkout_info, lines_info):
 
 def _clear_checkout_discount(
     checkout_info: "CheckoutInfo", lines_info: list["CheckoutLineInfo"], save: bool
-):
+) -> None:
     delete_gift_line(checkout_info.checkout, lines_info)
     if checkout_info.discounts:
         CheckoutDiscount.objects.filter(

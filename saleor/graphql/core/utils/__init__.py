@@ -7,6 +7,7 @@ from typing import Literal, NoReturn, overload
 import graphene
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db.models import Model
 from graphene import ObjectType
 from graphql import GraphQLError
 
@@ -107,7 +108,7 @@ def from_global_id_or_none(
     return from_global_id_or_error(global_id, only_type, raise_error)[1]
 
 
-def to_global_id_or_none(instance):
+def to_global_id_or_none(instance: Model | None) -> str | None:
     class_name = instance.__class__.__name__
     if instance is None or instance.pk is None:
         return None
