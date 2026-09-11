@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Any
+
 from django.db import transaction
 
 from ...webhook.event_types import WebhookEventAsyncType
@@ -16,7 +19,10 @@ def get_is_deferred_payload(event_name: str) -> bool:
     )
 
 
-def call_event(func_obj, *func_args, **func_kwargs):
+# Any: event callables are heterogeneous plugin-manager methods with arbitrary args.
+def call_event(
+    func_obj: Callable[..., Any], *func_args: Any, **func_kwargs: Any
+) -> None:
     """Call webhook event with given args.
 
     Ensures that in atomic transaction event is called on_commit.

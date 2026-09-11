@@ -2,7 +2,7 @@ from enum import Enum
 
 
 class PaymentError(Exception):
-    def __init__(self, message, code=None):
+    def __init__(self, message: str, code: str | None = None) -> None:
         super().__init__(message, code)
         self.message = message
         self.code = code

@@ -93,11 +93,11 @@ class MoneyField(NonDatabaseFieldBase):
 
     def __init__(
         self,
-        amount_field="price_amount",
-        currency_field="price_currency",
-        verbose_name=None,
-        **kwargs,
-    ):
+        amount_field: str = "price_amount",
+        currency_field: str = "price_currency",
+        verbose_name: str | None = None,
+        **kwargs: object,
+    ) -> None:
         super().__init__(**kwargs)
         self.amount_field = amount_field
         self.currency_field = currency_field
@@ -144,12 +144,12 @@ class TaxedMoneyField(NonDatabaseFieldBase):
 
     def __init__(
         self,
-        net_amount_field="price_amount_net",
-        gross_amount_field="price_amount_gross",
-        currency_field="currency",
-        verbose_name=None,
-        **kwargs,
-    ):
+        net_amount_field: str = "price_amount_net",
+        gross_amount_field: str = "price_amount_gross",
+        currency_field: str = "currency",
+        verbose_name: str | None = None,
+        **kwargs: object,
+    ) -> None:
         super().__init__(**kwargs)
         self.net_amount_field = net_amount_field
         self.gross_amount_field = gross_amount_field

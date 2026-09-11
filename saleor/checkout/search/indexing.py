@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 @with_promise_context
-def update_checkouts_search_vector(checkouts: list["Checkout"]):
+def update_checkouts_search_vector(checkouts: list["Checkout"]) -> None:
     """Update search vectors for multiple checkouts using efficient data loading."""
     checkout_pks = [checkout.pk for checkout in checkouts]
     # update search_index_dirty flag before to ensure that will not update search vector
@@ -57,7 +57,9 @@ def update_checkouts_search_vector(checkouts: list["Checkout"]):
             Checkout.objects.bulk_update(checkouts, ["search_vector"])
 
 
-def set_search_index_dirty(checkout_pks: list["UUID"], search_index_dirty_value: bool):
+def set_search_index_dirty(
+    checkout_pks: list["UUID"], search_index_dirty_value: bool
+) -> None:
     """Reset search vectors for multiple checkouts."""
     with transaction.atomic():
         with allow_writer():

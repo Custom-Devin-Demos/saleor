@@ -43,7 +43,12 @@ class NotApplicable(ValueError):
     Minimum quantity will be available as the `min_checkout_items_quantity` attribute.
     """
 
-    def __init__(self, msg, min_spent=None, min_checkout_items_quantity=None):
+    def __init__(
+        self,
+        msg: str,
+        min_spent: Money | None = None,
+        min_checkout_items_quantity: int | None = None,
+    ) -> None:
         super().__init__(msg)
         self.min_spent = min_spent
         self.min_checkout_items_quantity = min_checkout_items_quantity

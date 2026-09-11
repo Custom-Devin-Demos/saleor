@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class CheckoutLineInfo(LineInfo):
+class CheckoutLineInfo(LineInfo["CheckoutLineDiscount"]):
     line: "CheckoutLine"
     variant: "ProductVariant"
     product: "Product"
@@ -155,9 +155,12 @@ class CheckoutInfo:
 
     def get_country(self) -> str:
         address = self.shipping_address or self.billing_address
-        if address is None or not address.country:
-            return self.checkout.country.code
-        return address.country.code
+        country_code: str = (
+            self.checkout.country.code
+            if address is None or not address.country
+            else address.country.code
+        )
+        return country_code
 
     def get_customer_email(self) -> str | None:
         if self.checkout.email:
@@ -292,8 +295,8 @@ def get_variant_channel_listing(
 def _product_channel_listing_is_valid(
     checkout: "Checkout",
     product: "Product",
-    product_channel_listing_mapping: dict,
-):
+    product_channel_listing_mapping: dict[int, Optional["ProductChannelListing"]],
+) -> bool:
     product_channel_listing = _get_product_channel_listing(
         product_channel_listing_mapping, checkout.channel_id, product
     )
@@ -310,8 +313,8 @@ def _is_variant_valid(
     checkout: "Checkout",
     product: "Product",
     variant_channel_listing: Optional["ProductVariantChannelListing"],
-    product_channel_listing_mapping: dict,
-):
+    product_channel_listing_mapping: dict[int, Optional["ProductChannelListing"]],
+) -> bool:
     if not variant_channel_listing or variant_channel_listing.price is None:
         return False
 
@@ -325,8 +328,10 @@ def _is_variant_valid(
 
 
 def _get_product_channel_listing(
-    product_channel_listing_mapping: dict, channel_id: int, product: "Product"
-):
+    product_channel_listing_mapping: dict[int, Optional["ProductChannelListing"]],
+    channel_id: int,
+    product: "Product",
+) -> Optional["ProductChannelListing"]:
     product_channel_listing = product_channel_listing_mapping.get(product.id)
     if product.id not in product_channel_listing_mapping:
         for channel_listing in product.channel_listings.all():

@@ -129,7 +129,7 @@ def get_not_available_lines(
         ],
         ProductChannelListing,
     ],
-):
+) -> list["CheckoutLineInfo"]:
     lines_not_available = []
     now = datetime.datetime.now(tz=datetime.UTC)
     for line in lines:
@@ -197,7 +197,7 @@ def get_checkout_problems(
     checkout_lines_problem: dict[
         CHECKOUT_LINE_PK_TYPE, list[CHECKOUT_LINE_PROBLEM_TYPE]
     ],
-):
+) -> list[CHECKOUT_PROBLEM_TYPE]:
     """Return a list of all problems with the checkout.
 
     It accepts the list of the checkout line info with the list of the stocks available

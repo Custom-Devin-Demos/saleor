@@ -2,7 +2,7 @@ from decimal import Decimal
 from operator import attrgetter
 from re import match
 from typing import TYPE_CHECKING, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.contrib.postgres.indexes import BTreeIndex, GinIndex
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
 
 class OrderQueryset(models.QuerySet["Order"]):
-    def get_by_checkout_token(self, token):
+    def get_by_checkout_token(self, token: UUID) -> "Order | None":
         """Return non-draft order with matched checkout token."""
         return self.non_draft().filter(checkout_token=token).first()
 

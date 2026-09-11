@@ -450,7 +450,7 @@ def add_gift_cards_to_order(
     total_before_gift_card_compensation = total_price_left
     order_gift_cards = []
     gift_cards_to_update = []
-    balance_data: list[tuple[GiftCard, float]] = []
+    balance_data: list[tuple[GiftCard, Decimal]] = []
     used_by_user = checkout_info.user
     used_by_email = cast(str, checkout_info.get_customer_email())
     for gift_card in checkout_info.checkout.gift_cards.select_for_update():
@@ -498,7 +498,7 @@ def add_gift_cards_to_order(
 def update_gift_card_balance(
     gift_card: GiftCard,
     total_price_left: Money,
-    balance_data: list[tuple[GiftCard, float]],
+    balance_data: list[tuple[GiftCard, Decimal]],
 ) -> Money:
     previous_balance = gift_card.current_balance
     if total_price_left < gift_card.current_balance:

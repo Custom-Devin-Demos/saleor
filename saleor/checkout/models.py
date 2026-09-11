@@ -1,6 +1,7 @@
 """Checkout-related ORM models."""
 
 import datetime
+from collections.abc import Iterator
 from decimal import Decimal
 from operator import attrgetter
 from typing import TYPE_CHECKING, Optional
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from ..product.models import ProductVariant
 
 
-def get_default_country():
+def get_default_country() -> str:
     return settings.DEFAULT_COUNTRY
 
 
@@ -337,7 +338,7 @@ class Checkout(models.Model):
             ),
         ]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator["CheckoutLine"]:
         return iter(self.lines.all())
 
     def safe_update(self, update_fields: list[str]) -> None:
@@ -411,7 +412,7 @@ class Checkout(models.Model):
 
     def set_country(
         self, country_code: str, commit: bool = False, replace: bool = True
-    ):
+    ) -> None:
         """Set country for checkout."""
         if not replace and self.country is not None:
             return
@@ -419,14 +420,14 @@ class Checkout(models.Model):
         if commit:
             self.save(update_fields=["country"])
 
-    def get_country(self):
+    def get_country(self) -> str:
         address = self.shipping_address or self.billing_address
-        saved_country = self.country
+        saved_country_code: str = self.country.code
         if address is None or not address.country:
-            return saved_country.code
+            return saved_country_code
 
-        country_code = address.country.code
-        if not country_code == saved_country.code:
+        country_code: str = address.country.code
+        if not country_code == saved_country_code:
             self.set_country(country_code, commit=True)
         return country_code
 
@@ -503,27 +504,28 @@ class CheckoutLine(ModelWithMetadata):
     class Meta(ModelWithMetadata.Meta):
         ordering = ("created_at", "id")
 
-    def __str__(self):
+    def __str__(self) -> str:
         return smart_str(self.variant)
 
     __hash__ = models.Model.__hash__
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, CheckoutLine):
             return NotImplemented
 
         return self.variant == other.variant and self.quantity == other.quantity
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> bool:
         return not self == other  # pragma: no cover
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<CheckoutLine: variant={self.variant!r}, quantity={self.quantity!r}, total={self.total_price_gross_amount} {self.currency}>"
 
-    def __getstate__(self):
+    # Pickles as a (variant, quantity) tuple instead of Model's state dict.
+    def __getstate__(self) -> tuple["ProductVariant", int]:  # type: ignore[override]
         return self.variant, self.quantity
 
-    def __setstate__(self, data):
+    def __setstate__(self, data: tuple["ProductVariant", int]) -> None:
         self.variant, self.quantity = data
 
     def is_shipping_required(self) -> bool:

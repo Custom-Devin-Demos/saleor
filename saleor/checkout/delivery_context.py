@@ -31,6 +31,8 @@ from .lock_objects import checkout_qs_select_for_update
 from .models import Checkout, CheckoutDelivery, CheckoutLine
 
 if TYPE_CHECKING:
+    from django.db.models import QuerySet
+
     from ..account.models import Address, User
     from ..app.models import App
     from ..plugins.manager import PluginsManager
@@ -48,7 +50,7 @@ class DeliveryMethodBase:
         pass
 
     @property
-    def delivery_method_order_field(self) -> dict:
+    def delivery_method_order_field(self) -> dict[str, object]:
         return {"shipping_method": self.delivery_method}
 
     @property
@@ -86,7 +88,7 @@ class ShippingMethodInfo(DeliveryMethodBase):
         return {"shipping_method_name": str(self.delivery_method.name)}
 
     @property
-    def delivery_method_order_field(self) -> dict:
+    def delivery_method_order_field(self) -> dict[str, object]:
         if not self.delivery_method.is_external:
             return {"shipping_method_id": int(self.delivery_method.id)}
         return {}
@@ -124,15 +126,15 @@ class CollectionPointInfo(DeliveryMethodBase):
     shipping_address: Optional["Address"]
 
     @property
-    def warehouse_pk(self):
+    def warehouse_pk(self) -> UUID | None:
         return self.delivery_method.pk
 
     @property
-    def delivery_method_order_field(self) -> dict:
+    def delivery_method_order_field(self) -> dict[str, object]:
         return {"collection_point": self.delivery_method}
 
     @property
-    def is_local_collection_point(self):
+    def is_local_collection_point(self) -> bool:
         return (
             self.delivery_method.click_and_collect_option
             == WarehouseClickAndCollectOption.LOCAL_STOCK
@@ -155,7 +157,7 @@ class CollectionPointInfo(DeliveryMethodBase):
             and self.shipping_address == self.delivery_method.address
         )
 
-    def is_method_in_valid_methods(self, checkout_info) -> bool:
+    def is_method_in_valid_methods(self, checkout_info: "CheckoutInfo") -> bool:
         valid_delivery_methods = checkout_info.valid_pick_up_points
         return bool(
             valid_delivery_methods and self.delivery_method in valid_delivery_methods
@@ -168,7 +170,7 @@ class CollectionPointInfo(DeliveryMethodBase):
         }
 
 
-def is_shipping_required(lines: list["CheckoutLineInfo"]):
+def is_shipping_required(lines: list["CheckoutLineInfo"]) -> bool:
     """Check if shipping is required for given checkout lines."""
     return any(line_info.product_type.is_shipping_required for line_info in lines)
 
@@ -225,7 +227,7 @@ def get_valid_collection_points_for_checkout(
     channel_id: int,
     quantity_check: bool = True,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> "QuerySet[Warehouse] | list[Warehouse]":
     """Return a collection of `Warehouse`s that can be used as a collection point.
 
     Note that `quantity_check=False` should be used, when stocks quantity will
@@ -236,20 +238,22 @@ def get_valid_collection_points_for_checkout(
         return []
 
     line_ids = [line_info.line.id for line_info in lines]
-    lines = CheckoutLine.objects.using(database_connection_name).filter(id__in=line_ids)
+    lines_qs = CheckoutLine.objects.using(database_connection_name).filter(
+        id__in=line_ids
+    )
 
     return (
         Warehouse.objects.using(
             database_connection_name
-        ).applicable_for_click_and_collect(lines, channel_id)
+        ).applicable_for_click_and_collect(lines_qs, channel_id)
         if quantity_check
         else Warehouse.objects.using(
             database_connection_name
-        ).applicable_for_click_and_collect_no_quantity_check(lines, channel_id)
+        ).applicable_for_click_and_collect_no_quantity_check(lines_qs, channel_id)
     )
 
 
-def _remove_undiscounted_base_shipping_price(checkout: Checkout):
+def _remove_undiscounted_base_shipping_price(checkout: Checkout) -> list[str]:
     if checkout.undiscounted_base_shipping_price_amount:
         checkout.undiscounted_base_shipping_price_amount = Decimal(0)
         return ["undiscounted_base_shipping_price_amount"]
@@ -257,8 +261,8 @@ def _remove_undiscounted_base_shipping_price(checkout: Checkout):
 
 
 def _assign_undiscounted_base_shipping_price_to_checkout(
-    checkout, checkout_delivery: CheckoutDelivery
-):
+    checkout: Checkout, checkout_delivery: CheckoutDelivery
+) -> list[str]:
     current_shipping_price = quantize_price(
         checkout.undiscounted_base_shipping_price, checkout.currency
     )
@@ -289,7 +293,7 @@ def assign_shipping_method_to_checkout(
 
 
 def assign_collection_point_to_checkout(
-    checkout, collection_point: Warehouse
+    checkout: Checkout, collection_point: Warehouse
 ) -> list[str]:
     fields_to_update = []
     fields_to_update += _remove_undiscounted_base_shipping_price(checkout)
@@ -373,7 +377,7 @@ def _overwrite_assigned_delivery(
     checkout_info: "CheckoutInfo",
     assigned_delivery: CheckoutDelivery | None,
     refreshed_delivery: CheckoutDelivery | None,
-):
+) -> None:
     """Overwrite assigned delivery.
 
     Function overwrites the details of assigned delivery with the
@@ -410,7 +414,7 @@ def _overwrite_assigned_delivery(
 def _restore_assigned_delivery_as_valid(
     checkout: Checkout,
     assigned_delivery: CheckoutDelivery,
-):
+) -> None:
     # Database has a constrain on these fields, to keep the same ID of assigned delivery
     # we need to first delete the delivery that is marked as valid
     CheckoutDelivery.objects.filter(
@@ -424,7 +428,7 @@ def _restore_assigned_delivery_as_valid(
     assigned_delivery.save(update_fields=["is_valid"])
 
 
-def _invalidate_assigned_delivery(assigned_delivery: CheckoutDelivery):
+def _invalidate_assigned_delivery(assigned_delivery: CheckoutDelivery) -> None:
     # The unique constraint `unique_for_checkout` allows at most one row per
     # (checkout, shipping_method, is_valid) tuple. A stale invalid sibling may
     # already exist for the same shipping method, so remove it before flipping
@@ -444,7 +448,7 @@ def _preserve_assigned_delivery(
     checkout: Checkout,
     assigned_delivery: CheckoutDelivery | None,
     refreshed_delivery: CheckoutDelivery | None,
-):
+) -> None:
     """Preserve assigned delivery.
 
     Creates a new delivery method if the refreshed delivery has changed and marks the
@@ -480,7 +484,7 @@ def _refresh_checkout_deliveries(
     checkout_deliveries: list["CheckoutDelivery"],
     built_in_shipping_methods_dict: dict[int, ShippingMethodData],
     external_shipping_methods_dict: dict[str, ShippingMethodData],
-):
+) -> None:
     """Refresh checkout deliveries assigned to the checkout.
 
     It updates the `CheckoutDelivery` instances associated with the checkout, based
@@ -504,7 +508,9 @@ def _refresh_checkout_deliveries(
         _create_or_update_checkout_deliveries(checkout_deliveries)
 
 
-def _create_or_update_checkout_deliveries(deliveries: list[CheckoutDelivery]):
+def _create_or_update_checkout_deliveries(
+    deliveries: list[CheckoutDelivery],
+) -> None:
     CheckoutDelivery.objects.bulk_create(
         deliveries,
         update_conflicts=True,
@@ -622,7 +628,9 @@ def fetch_shipping_methods_for_checkout(
         )
     }
 
-    def with_external_methods(external_shipping_methods: list[ShippingMethodData]):
+    def with_external_methods(
+        external_shipping_methods: list[ShippingMethodData],
+    ) -> Promise[list[CheckoutDelivery]]:
         external_shipping_methods_dict: dict[str, ShippingMethodData] = {
             shipping_method.id: shipping_method
             for shipping_method in external_shipping_methods
@@ -641,9 +649,11 @@ def fetch_shipping_methods_for_checkout(
         )
 
         @allow_writer()
-        def with_excluded_methods(excluded_methods: list[ExcludedShippingMethod]):
+        def with_excluded_methods(
+            excluded_methods: list[ExcludedShippingMethod],
+        ) -> list[CheckoutDelivery]:
             initialize_shipping_method_active_status(all_methods, excluded_methods)
-            checkout_deliveries = {}
+            checkout_deliveries: dict[str, CheckoutDelivery] = {}
 
             for shipping_method_data in all_methods:
                 checkout_delivery_method = (
@@ -717,11 +727,13 @@ def fetch_shipping_methods_for_checkout(
         checkout_info=checkout_info,
         available_built_in_methods=list(built_in_shipping_methods_dict.values()),
         requestor=requestor,
-    ).then(with_external_methods)
+    ).then(
+        with_external_methods  # type: ignore[arg-type] # promise stubs do not model then() flattening nested promises
+    )
 
 
 def fetch_external_shipping_methods_for_checkout_info(
-    checkout_info,
+    checkout_info: "CheckoutInfo",
     available_built_in_methods: list[ShippingMethodData],
     requestor: Union["App", "User", None],
 ) -> Promise[list[ShippingMethodData]]:
@@ -773,7 +785,7 @@ def assign_delivery_method_to_checkout(
     lines_info: list["CheckoutLineInfo"],
     manager: "PluginsManager",
     delivery_method: CheckoutDelivery | Warehouse | None,
-):
+) -> None:
     fields_to_update = []
     checkout = checkout_info.checkout
     with transaction.atomic():

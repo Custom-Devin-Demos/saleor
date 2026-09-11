@@ -1,8 +1,10 @@
 import datetime
 import logging
 from decimal import Decimal
+from uuid import UUID
 
 import graphene
+from celery import Task
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -137,7 +139,7 @@ def delete_expired_checkouts(
 
 
 @app.task
-def trigger_automatic_checkout_completion_task():
+def trigger_automatic_checkout_completion_task() -> None:
     """Trigger automatic checkout completion for eligible checkouts.
 
     This task:
@@ -211,11 +213,11 @@ def trigger_automatic_checkout_completion_task():
 )
 @allow_writer()
 def automatic_checkout_completion_task(
-    self,
-    checkout_pk,
-    user_id=None,
-    app_id=None,
-):
+    self: Task,
+    checkout_pk: UUID,
+    user_id: int | None = None,
+    app_id: int | None = None,
+) -> None:
     """Try to automatically complete the checkout.
 
     If any error is raised during the process, it will be caught and logged.
@@ -315,7 +317,7 @@ def automatic_checkout_completion_task(
     queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,
     expires=settings.BEAT_UPDATE_SEARCH_EXPIRE_AFTER_SEC,
 )
-def update_checkouts_search_vector_task():
+def update_checkouts_search_vector_task() -> None:
     """Update search vectors for dirty checkouts by delegating to parallel batch tasks.
 
     This task orchestrates the search vector update process by:
@@ -348,7 +350,7 @@ def update_checkouts_search_vector_task():
 
 
 @app.task(expires=settings.BEAT_UPDATE_SEARCH_EXPIRE_AFTER_SEC)
-def update_checkouts_search_vector_task_batch_process(pks: list[int]):
+def update_checkouts_search_vector_task_batch_process(pks: list[int]) -> None:
     """Process a batch of checkouts to update their search vectors.
 
     This worker task handles a subset of checkouts by:

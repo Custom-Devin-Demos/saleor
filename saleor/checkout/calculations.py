@@ -273,7 +273,7 @@ def checkout_line_undiscounted_unit_price(
     *,
     checkout_info: "CheckoutInfo",
     checkout_line_info: "CheckoutLineInfo",
-):
+) -> Money:
     # Fetch the undiscounted unit price from channel listings in case the prices
     # are invalidated.
     if checkout_info.checkout.price_expiration < timezone.now():
@@ -288,7 +288,7 @@ def checkout_line_undiscounted_total_price(
     *,
     checkout_info: "CheckoutInfo",
     checkout_line_info: "CheckoutLineInfo",
-):
+) -> Money:
     undiscounted_unit_price = checkout_line_undiscounted_unit_price(
         checkout_info=checkout_info, checkout_line_info=checkout_line_info
     )
@@ -296,7 +296,9 @@ def checkout_line_undiscounted_total_price(
     return quantize_price(total_price, total_price.currency)
 
 
-def update_undiscounted_unit_price_for_lines(lines: Iterable["CheckoutLineInfo"]):
+def update_undiscounted_unit_price_for_lines(
+    lines: Iterable["CheckoutLineInfo"],
+) -> None:
     """Update line undiscounted unit price amount.
 
     Undiscounted unit price stores the denormalized price of the variant.
@@ -308,7 +310,7 @@ def update_undiscounted_unit_price_for_lines(lines: Iterable["CheckoutLineInfo"]
         line_info.line.undiscounted_unit_price = line_info.undiscounted_unit_price
 
 
-def update_prior_unit_price_for_lines(lines: Iterable["CheckoutLineInfo"]):
+def update_prior_unit_price_for_lines(lines: Iterable["CheckoutLineInfo"]) -> None:
     """Update line prior unit price amount.
 
     Prior unit price stores the price of the variant before promotion.
@@ -341,7 +343,7 @@ def promise_calculate_taxes_with_error_handling(
     checkout = checkout_info.checkout
 
     @allow_writer_for_default_connection(database_connection_name)
-    def process_error(e: Exception):
+    def process_error(e: Exception) -> None:
         if not isinstance(e, TaxDataError):
             raise e
         if str(e) != TaxDataErrorMessage.EMPTY:
@@ -352,7 +354,7 @@ def promise_calculate_taxes_with_error_handling(
         _set_checkout_base_prices(checkout, checkout_info, lines)
         checkout.tax_error = str(e)
 
-    return _calculate_and_add_tax(
+    result: Promise[None] = _calculate_and_add_tax(
         tax_calculation_strategy=tax_calculation_strategy,
         tax_app_identifier=tax_app_identifier,
         checkout_info=checkout_info,
@@ -362,6 +364,7 @@ def promise_calculate_taxes_with_error_handling(
         requestor=requestor,
         database_connection_name=database_connection_name,
     ).catch(process_error)
+    return result
 
 
 def _fetch_checkout_prices_if_expired(
@@ -420,7 +423,7 @@ def _fetch_checkout_prices_if_expired(
 
     checkout.tax_error = None
 
-    def remove_tax_if_needed(_):
+    def remove_tax_if_needed(_: None) -> None:
         if should_charge_tax:
             return
         # If charge_taxes is disabled or checkout is exempt from taxes, remove the
@@ -428,7 +431,9 @@ def _fetch_checkout_prices_if_expired(
         _remove_tax(checkout, lines)
         return
 
-    def process_calculation_result(_):
+    def process_calculation_result(
+        _: None,
+    ) -> tuple["CheckoutInfo", list["CheckoutLineInfo"]]:
         price_expiration = timezone.now() + settings.CHECKOUT_PRICES_TTL
         checkout.price_expiration = price_expiration
         checkout.discount_expiration = price_expiration
@@ -532,7 +537,7 @@ def recalculate_discounts(
     ):
         return checkout_info, lines_info
 
-    lines = cast(list, lines_info)
+    lines = cast(list["CheckoutLineInfo"], lines_info)
     update_undiscounted_unit_price_for_lines(lines)
     update_prior_unit_price_for_lines(lines)
 
@@ -566,11 +571,11 @@ def _calculate_and_add_tax(
     prices_entered_with_tax: bool,
     requestor: Union["App", "User", None],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> Promise[None]:
     checkout = checkout_info.checkout
 
     @allow_writer_for_default_connection(database_connection_name)
-    def process_flat_taxes(_):
+    def process_flat_taxes(_: None) -> None:
         # Get taxes calculated with flat rates and apply to checkout.
         update_checkout_prices_with_flat_rates(
             checkout,
@@ -593,7 +598,7 @@ def _calculate_and_add_tax(
         )
 
     # Deprecated flow when no tax app identifier is provided.
-    def recalculate_with_tax_app_data(tax_data: TaxData | None):
+    def recalculate_with_tax_app_data(tax_data: TaxData | None) -> None:
         _apply_tax_data(checkout, lines, tax_data)
 
     # Call the tax plugins.
@@ -620,7 +625,7 @@ def _call_plugin_or_tax_app(
 ) -> Promise[None]:
     checkout = checkout_info.checkout
 
-    def recalculate_with_plugins(_):
+    def recalculate_with_plugins(_: None) -> Promise[None]:
         plugin_ids = [tax_app_identifier.replace(PLUGIN_IDENTIFIER_PREFIX, "")]
         plugins = manager.get_plugins(
             checkout_info.channel.slug,
@@ -641,9 +646,11 @@ def _call_plugin_or_tax_app(
         return Promise.resolve(None)
 
     if tax_app_identifier.startswith(PLUGIN_IDENTIFIER_PREFIX):
-        return Promise.resolve(None).then(recalculate_with_plugins)
+        return Promise.resolve(None).then(
+            recalculate_with_plugins  # type: ignore[arg-type] # promise stubs do not model then() flattening nested promises
+        )
 
-    def recalculate_with_tax_app_data(tax_data: TaxData | None):
+    def recalculate_with_tax_app_data(tax_data: TaxData | None) -> None:
         _apply_tax_data(checkout, lines, tax_data)
 
     return _get_promised_taxes_for_checkout(
@@ -669,7 +676,7 @@ def _get_promised_taxes_for_checkout(
     from .utils import log_address_if_validation_skipped_for_checkout
     from .webhooks import calculate_taxes as checkout_calculate_taxes
 
-    def process_error(e: Exception):
+    def process_error(e: Exception) -> Promise[TaxData | None]:
         if isinstance(e, TaxDataError):
             log_address_if_validation_skipped_for_checkout(checkout_info, logger)
         return Promise.reject(e)
@@ -692,7 +699,7 @@ def _get_promised_taxes_for_checkout(
     )
 
 
-def _remove_tax(checkout, lines_info):
+def _remove_tax(checkout: "Checkout", lines_info: list["CheckoutLineInfo"]) -> None:
     checkout.total_gross_amount = checkout.total_net_amount
     checkout.subtotal_gross_amount = checkout.subtotal_net_amount
     checkout.shipping_price_gross_amount = checkout.shipping_price_net_amount
@@ -704,7 +711,7 @@ def _remove_tax(checkout, lines_info):
         line_info.line.tax_rate = Decimal("0.00")
 
 
-def _calculate_checkout_total(checkout, currency):
+def _calculate_checkout_total(checkout: "Checkout", currency: str) -> TaxedMoney:
     total = checkout.subtotal + checkout.shipping_price
     return quantize_price(
         total,
@@ -712,7 +719,9 @@ def _calculate_checkout_total(checkout, currency):
     )
 
 
-def _calculate_checkout_subtotal(lines, currency):
+def _calculate_checkout_subtotal(
+    lines: list["CheckoutLineInfo"], currency: str
+) -> TaxedMoney:
     line_totals = [line_info.line.total_price for line_info in lines]
     total = sum(line_totals, zero_taxed_money(currency))
     return quantize_price(
@@ -861,7 +870,7 @@ def fetch_checkout_data(
     @allow_writer_for_default_connection(database_connection_name)
     def process_refreshed_prices(
         data: tuple["CheckoutInfo", list["CheckoutLineInfo"]],
-    ):
+    ) -> tuple["CheckoutInfo", list["CheckoutLineInfo"]]:
         checkout_info, lines = data
         current_total_gross = checkout_info.checkout.total.gross
         if (

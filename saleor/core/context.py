@@ -1,7 +1,9 @@
+from collections.abc import Callable
+
 from promise import Promise
 
 
-def with_promise_context(func):
+def with_promise_context[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Execute function within Promise context.
 
     Allow to use dataloaders inside the function.

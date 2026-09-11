@@ -31,6 +31,8 @@ from .models import FulfillmentLine, Order, OrderLine
 if TYPE_CHECKING:
     from ..account.models import User  # noqa: F401
     from ..app.models import App
+    from ..plugins.manager import PluginsManager
+    from .fetch import OrderInfo
 
 
 @dataclass
@@ -313,7 +315,7 @@ def get_custom_order_payload(order: Order):
 
 def get_default_order_payload(
     order: "Order",
-    redirect_url: str = "",
+    redirect_url: str | None = "",
     lines: Iterable["OrderLine"] | None = None,
     attribute_data: AttributeData | None = None,
 ):
@@ -405,7 +407,9 @@ def prepare_order_details_url(order: Order, redirect_url: str) -> str:
     return prepare_url(params, redirect_url)
 
 
-def send_order_confirmation(order_info, redirect_url, manager):
+def send_order_confirmation(
+    order_info: "OrderInfo", redirect_url: str | None, manager: "PluginsManager"
+) -> None:
     """Send notification with order confirmation."""
 
     def _generate_payload():

@@ -416,7 +416,6 @@ class CheckoutCreateFromOrder(BaseMutation):
                     for line in valid_order_lines
                 ],
                 order.channel,
-                site.settings.limit_quantity_per_checkout,
                 reservation_length=get_reservation_length(
                     site=site, user=info.context.user
                 ),

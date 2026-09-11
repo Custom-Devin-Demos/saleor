@@ -30,7 +30,7 @@ def clean_checkout_shipping(
         | type[PaymentErrorCode]
         | type[OrderCreateFromCheckoutErrorCode]
     ),
-):
+) -> None:
     delivery_method_info = checkout_info.get_delivery_method_info()
 
     if is_shipping_required(lines):
@@ -72,7 +72,7 @@ def clean_billing_address(
         | type[PaymentErrorCode]
         | type[OrderCreateFromCheckoutErrorCode]
     ),
-):
+) -> None:
     if not checkout_info.billing_address:
         raise ValidationError(
             {
@@ -90,7 +90,7 @@ def clean_checkout_payment(
     lines: list["CheckoutLineInfo"],
     error_code: type[CheckoutErrorCode],
     last_payment: payment_models.Payment | None,
-):
+) -> None:
     clean_billing_address(checkout_info, error_code)
     if not is_fully_paid(manager, checkout_info, lines):
         gateway.payment_refund_or_void(
@@ -102,7 +102,7 @@ def clean_checkout_payment(
         )
 
 
-def validate_checkout_email(checkout: models.Checkout):
+def validate_checkout_email(checkout: models.Checkout) -> None:
     if not checkout.email:
         raise ValidationError(
             "Checkout email must be set.",
@@ -110,7 +110,7 @@ def validate_checkout_email(checkout: models.Checkout):
         )
 
 
-def _validate_gift_cards(checkout: Checkout):
+def _validate_gift_cards(checkout: Checkout) -> None:
     """Check if all gift cards assigned to checkout are available."""
     today = datetime.datetime.now(tz=datetime.UTC).date()
     all_gift_cards = GiftCard.objects.filter(checkouts=checkout.token).count()
@@ -148,7 +148,7 @@ def validate_checkout(
     lines: list["CheckoutLineInfo"],
     unavailable_variant_pks: Iterable[int],
     manager: "PluginsManager",
-):
+) -> None:
     """Validate all required data for converting checkout into order."""
     if not checkout_info.channel.is_active:
         raise ValidationError(

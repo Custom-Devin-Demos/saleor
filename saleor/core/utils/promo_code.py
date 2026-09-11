@@ -1,4 +1,5 @@
 import secrets
+from typing import Any
 
 from django.core.exceptions import ValidationError
 
@@ -8,7 +9,11 @@ from ...giftcard.models import GiftCard
 
 
 class InvalidPromoCode(ValidationError):
-    def __init__(self, message=None, **kwargs):
+    def __init__(
+        self,
+        message: str | dict[str, ValidationError] | None = None,
+        **kwargs: Any,  # forwarded verbatim to ValidationError
+    ) -> None:
         if message is None:
             message = {
                 "promo_code": ValidationError(
@@ -36,9 +41,9 @@ def is_available_promo_code(code):
     return not (promo_code_is_gift_card(code) or promo_code_is_voucher(code))
 
 
-def promo_code_is_voucher(code):
+def promo_code_is_voucher(code: str) -> bool:
     return VoucherCode.objects.filter(code=code).exists()
 
 
-def promo_code_is_gift_card(code):
+def promo_code_is_gift_card(code: str) -> bool:
     return GiftCard.objects.filter(code=code).exists()
