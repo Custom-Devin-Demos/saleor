@@ -188,7 +188,8 @@ class WebhookTrigger(BaseMutation):
                         "deferred_payload_data": asdict(deferred_payload_data),
                         "telemetry_context": get_task_context().to_dict(),
                     },
-                    MessageGroupId=message_group_id,
+                    # celery-types omits Celery's pass-through **options (SQS MessageGroupId)
+                    MessageGroupId=message_group_id,  # type: ignore[call-arg]
                 )
             else:
                 deliveries = create_deliveries_for_subscriptions(
