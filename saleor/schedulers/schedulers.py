@@ -1,7 +1,7 @@
 import copy
 import logging
 import time
-from typing import Any, NamedTuple
+from typing import NamedTuple, cast
 
 import celery.beat
 import celery.schedules
@@ -60,7 +60,9 @@ class CustomModelEntry(ModelEntry):
 class BaseScheduler(celery.beat.Scheduler):
     """Define the base scheduler for Celery beat."""
 
-    old_schedulers: Any | None
+    old_schedulers: dict[str, celery.beat.ScheduleEntry] | None
+    # private heap kept by celery.beat.Scheduler; not declared in celery-types
+    _heap: list[HeapEventType] | None
 
     def tick(
         self,
@@ -84,10 +86,14 @@ class BaseScheduler(celery.beat.Scheduler):
         This code is all original except when noted it's not.
         """
         adjust = self.adjust
-        max_interval = self.max_interval
+        # celery-types types max_interval as int | None, but Scheduler.__init__
+        # always resolves it to an int
+        max_interval = cast(int, self.max_interval)
 
+        # celery's schedules_equal accepts None; celery-types requires a dict
         if self._heap is None or not self.schedules_equal(
-            self.old_schedulers, self.schedule
+            self.old_schedulers,  # type: ignore[arg-type]
+            self.schedule,
         ):
             self.old_schedulers = copy.copy(self.schedule)
             self.populate_heap()
@@ -120,11 +126,13 @@ class BaseScheduler(celery.beat.Scheduler):
 
             if is_due:
                 H.pop(heap_pos)
-                next_entry = self.reserve(entry)
+                # celery's reserve() returns a ScheduleEntry; celery-types says event_t
+                next_entry = cast(celery.beat.ScheduleEntry, self.reserve(entry))
                 self.apply_entry(entry, producer=self.producer)
                 H.append(
                     HeapEventType(
-                        self._when(next_entry, next_time_to_run),
+                        # private helper of celery.beat.Scheduler, absent from stubs
+                        self._when(next_entry, next_time_to_run),  # type: ignore[attr-defined]
                         event[1],
                         next_entry,
                     )
@@ -136,7 +144,8 @@ class BaseScheduler(celery.beat.Scheduler):
                 )
         # Non-original code, custom fix for Celery not waiting the correct duration
         # when the first task in heap needs to wait longer than other tasks in heap
-        adjusted_next_time_to_run = adjust(next_tick)
+        # celery's adjust() accepts floats; celery-types declares int
+        adjusted_next_time_to_run = adjust(next_tick)  # type: ignore[arg-type]
         return min(
             adjusted_next_time_to_run
             if is_numeric_value(adjusted_next_time_to_run)

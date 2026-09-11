@@ -58,7 +58,10 @@ def set_user_search_document_values(updated_count: int = 0) -> None:
     set_user_search_document_values.delay(updated_count)
 
 
-@app.task(queue=settings.DATA_MIGRATIONS_TASKS_QUEUE_NAME)
+@app.task(
+    # celery-types declares queue as str, but Celery accepts None (default queue)
+    queue=settings.DATA_MIGRATIONS_TASKS_QUEUE_NAME,  # type: ignore[arg-type]
+)
 def set_order_search_document_values(
     update_all: bool = False,
     database_connection_name: str = settings.DATABASE_CONNECTION_REPLICA_NAME,

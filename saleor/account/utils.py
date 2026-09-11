@@ -147,7 +147,7 @@ def change_user_default_address(
         set_user_default_shipping_address(user, address)
 
 
-def retrieve_user_by_email(email):
+def retrieve_user_by_email(email: str) -> User | None:
     """Retrieve user by email.
 
     Email lookup is case-insensitive, unless the query returns more than one user. In

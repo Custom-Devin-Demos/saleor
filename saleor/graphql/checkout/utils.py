@@ -5,7 +5,7 @@ from ...core.exceptions import CircularSubscriptionSyncEvent
 from ...webhook.event_types import WebhookEventSyncType
 
 
-def prepare_insufficient_stock_checkout_validation_error(exc):
+def prepare_insufficient_stock_checkout_validation_error(exc) -> ValidationError:
     variants = [str(item.variant) for item in exc.items]
     variant_ids = [
         graphene.Node.to_global_id("ProductVariant", item.variant.pk)

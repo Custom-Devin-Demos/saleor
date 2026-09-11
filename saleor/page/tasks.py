@@ -23,7 +23,8 @@ def mark_pages_search_vector_as_dirty(page_ids: list[int]):
 
 
 @app.task(
-    queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,
+    # celery-types declares queue as str, but Celery accepts None (default queue)
+    queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,  # type: ignore[arg-type]
     expires=settings.BEAT_UPDATE_SEARCH_EXPIRE_AFTER_SEC,
 )
 def update_pages_search_vector_task():

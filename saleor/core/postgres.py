@@ -6,7 +6,7 @@ from django.contrib.postgres.search import (
     SearchVector,
     SearchVectorCombinable,
 )
-from django.db.models import Expression, Value
+from django.db.models import Expression, Field, Value
 
 from .utils.text import strip_accents
 
@@ -44,8 +44,13 @@ class NoValidationSearchVector(SearchVector, NoValidationSearchVectorCombinable)
     and/or over clause.
     """
 
-    def __init__(self, *expressions, config=None, weight=None):
-        processed = []
+    def __init__(
+        self,
+        *expressions: Expression | str,
+        config: Expression | str | None = None,
+        weight: str | None = None,
+    ) -> None:
+        processed: list[Expression | str] = []
         for expr in expressions:
             if isinstance(expr, Value) and isinstance(expr.value, str):
                 # Normalize only string literals to make search accent-insensitive.
@@ -82,7 +87,9 @@ class FlatConcat(Expression):
     max_expression_count: int | None = None
     silent_drop_expression: bool = False
 
-    def __init__(self, *expressions, output_field=None):
+    def __init__(
+        self, *expressions: Expression | str, output_field: Field | None = None
+    ) -> None:
         super().__init__(output_field=output_field)
         if (
             self.max_expression_count is not None

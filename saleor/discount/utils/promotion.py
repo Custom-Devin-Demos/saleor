@@ -73,7 +73,7 @@ def prepare_promotion_discount_reason(promotion: Promotion):
     return f"Promotion: {graphene.Node.to_global_id('Promotion', promotion.id)}"
 
 
-def get_sale_id(promotion: "Promotion"):
+def get_sale_id(promotion: "Promotion") -> str:
     return (
         graphene.Node.to_global_id("Sale", promotion.old_sale_id)
         if promotion.old_sale_id

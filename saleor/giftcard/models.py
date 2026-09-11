@@ -1,3 +1,4 @@
+import datetime
 import os
 
 from django.conf import settings
@@ -31,8 +32,8 @@ class GiftCardTag(models.Model):
         ]
 
 
-class GiftCardQueryset(models.QuerySet):
-    def active(self, date):
+class GiftCardQueryset(models.QuerySet["GiftCard"]):
+    def active(self, date: datetime.date) -> "GiftCardQueryset":
         return self.filter(
             Q(expiry_date__isnull=True) | Q(expiry_date__gte=date),
             is_active=True,

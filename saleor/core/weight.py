@@ -17,7 +17,7 @@ from django.contrib.sites.models import Site
 from measurement.measures import Weight
 
 
-def zero_weight():
+def zero_weight() -> Weight:
     """Represent the zero weight value."""
     return Weight(kg=0)
 
