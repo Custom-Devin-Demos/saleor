@@ -1118,7 +1118,9 @@ def complete_checkout_pre_payment_part(
         )
     except Checkout.DoesNotExist:
         order = Order.objects.get_by_checkout_token(checkout_info.checkout.token)
-        return order
+        # TODO(mypy-strict): `get_by_checkout_token` may return None and this
+        # function declares a tuple return; pre-existing behavior kept as-is.
+        return order  # type: ignore[return-value]
     except ValidationError as exc:
         _complete_checkout_fail_handler(checkout_info, manager, payment=payment)
         raise exc
@@ -1597,14 +1599,16 @@ def create_order_from_checkout(
             )
             if not checkout:
                 order = Order.objects.get_by_checkout_token(checkout_pk)
-                return order
+                # TODO(mypy-strict): may be None; pre-existing behavior kept as-is.
+                return order  # type: ignore[return-value]
             code = _increase_voucher_code_usage_value(checkout_info=checkout_info)
 
     with transaction.atomic():
         checkout = Checkout.objects.select_for_update().filter(pk=checkout_pk).first()
         if not checkout:
             order = Order.objects.get_by_checkout_token(checkout_pk)
-            return order
+            # TODO(mypy-strict): may be None; pre-existing behavior kept as-is.
+            return order  # type: ignore[return-value]
 
         # Fetching checkout info inside the transaction block with select_for_update
         # ensure that we are processing checkout on the current data.

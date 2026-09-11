@@ -4,6 +4,7 @@ from typing import Optional, cast
 from uuid import UUID
 
 from django.db.models import prefetch_related_objects
+from prices import Money
 
 from ..channel.models import Channel
 from ..core.db.connection import allow_writer
@@ -22,7 +23,6 @@ from ..discount.utils.voucher import (
     attach_voucher_to_line_info,
     get_the_cheapest_line,
 )
-from ..graphql.core.types import Money
 from ..payment.models import Payment
 from ..product.models import (
     ProductVariant,
@@ -34,7 +34,7 @@ from .models import Order, OrderLine
 @dataclass
 class OrderInfo:
     order: "Order"
-    customer_email: "str"
+    customer_email: str | None
     channel: "Channel"
     payment: Optional["Payment"]
     lines_data: list["OrderLineInfo"]
@@ -86,11 +86,18 @@ class EditableOrderLineInfo(LineInfo["OrderLineDiscount"]):
     channel_listing: ProductVariantChannelListing | None = None
     voucher_denormalized_info: VoucherDenormalizedInfo | None = None
 
+    def get_catalogue_discounts(self) -> list["OrderLineDiscount"]:
+        return [
+            discount
+            for discount in self.discounts
+            if discount.type == DiscountType.PROMOTION
+        ]
+
     @property
     def variant_discounted_price(self) -> Money:
         """Return the variant price discounted by catalogue promotion."""
         catalogue_discounts = self.get_catalogue_discounts()
-        total_price = self.line.undiscounted_base_unit_price * self.line.quantity
+        total_price: Money = self.line.undiscounted_base_unit_price * self.line.quantity
         for discount in catalogue_discounts:
             total_price -= discount.amount
         unit_price = max(
@@ -183,7 +190,7 @@ def fetch_draft_order_lines_info(
     return lines_info
 
 
-def attach_voucher_info(lines_info: list[EditableOrderLineInfo], order: Order):
+def attach_voucher_info(lines_info: list[EditableOrderLineInfo], order: Order) -> None:
     """Collect necessary voucher info and attach it to order lines info."""
     voucher = order.voucher
     if voucher and (
@@ -203,7 +210,7 @@ def reattach_apply_once_per_order_voucher_info(
     lines_info: list[EditableOrderLineInfo],
     initial_cheapest_line_info: LineInfo | None,
     order: Order,
-):
+) -> None:
     """Reattach apply once per order voucher info if the cheapest line has changed."""
     if get_the_cheapest_line(lines_info) == initial_cheapest_line_info:
         return
@@ -221,6 +228,7 @@ def _get_variant_listing(
 ) -> ProductVariantChannelListing | None:
     if not variant:
         return None
+    channel_listing: ProductVariantChannelListing
     for channel_listing in variant.channel_listings.all():
         if channel_listing.channel_id == channel_id:
             return channel_listing
@@ -229,7 +237,7 @@ def _get_variant_listing(
 
 def _fetch_denormalized_voucher_info(
     lines_info: list[EditableOrderLineInfo], voucher: Voucher
-):
+) -> VoucherDenormalizedInfo | None:
     voucher_discounts = [
         discount
         for line_info in lines_info
@@ -257,7 +265,7 @@ def _attach_denormalized_voucher_to_line_info(
     lines_info: list[EditableOrderLineInfo],
     denormalized_voucher_info: VoucherDenormalizedInfo | None,
     voucher_code: str | None,
-):
+) -> None:
     if not denormalized_voucher_info:
         return
 

@@ -391,7 +391,7 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
     def __str__(self) -> str:
         return self.name or self.sku or f"ID:{self.pk}"
 
-    def get_global_id(self):
+    def get_global_id(self) -> str:
         return graphene.Node.to_global_id("ProductVariant", self.id)
 
     def get_base_price(
@@ -436,7 +436,7 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
 
         return channel_listing.prior_price.amount
 
-    def get_weight(self):
+    def get_weight(self) -> Weight:
         return self.weight or self.product.weight or self.product.product_type.weight
 
     def is_shipping_required(self) -> bool:

@@ -92,7 +92,7 @@ class FulfillmentApprove(BaseMutation):
         app = get_app_promise(info.context).get()
         site = get_site_promise(info.context).get()
         try:
-            fulfillment = approve_fulfillment(
+            approved_fulfillment = approve_fulfillment(
                 fulfillment,
                 user,
                 app,
@@ -107,6 +107,6 @@ class FulfillmentApprove(BaseMutation):
 
         order.refresh_from_db(fields=["status"])
         return FulfillmentApprove(
-            fulfillment=SyncWebhookControlContext(node=fulfillment),
+            fulfillment=SyncWebhookControlContext(node=approved_fulfillment),
             order=SyncWebhookControlContext(order),
         )

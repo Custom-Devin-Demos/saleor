@@ -23,8 +23,8 @@ from ..core.tracing import traced_atomic_transaction
 from ..core.utils.country import get_active_country
 from ..core.utils.translations import get_translation
 from ..core.weight import zero_weight
-from ..discount import DiscountType, DiscountValueType
-from ..discount.models import OrderDiscount, OrderLineDiscount, VoucherType
+from ..discount import DiscountType, DiscountValueType, VoucherType
+from ..discount.models import OrderDiscount, OrderLineDiscount
 from ..discount.utils.manual_discount import apply_discount_to_value
 from ..discount.utils.order import (
     create_order_line_discount_objects_for_catalogue_promotions,
@@ -64,16 +64,19 @@ from . import (
 from .base_calculations import base_order_total
 from .error_codes import OrderErrorCode
 from .fetch import OrderLineInfo, fetch_draft_order_lines_info
-from .models import Order, OrderGrantedRefund, OrderLine
+from .models import Fulfillment, Order, OrderGrantedRefund, OrderLine
 
 if TYPE_CHECKING:
+    from ..account.models import Address
     from ..app.models import App
     from ..channel.models import Channel
     from ..checkout.fetch import CheckoutInfo
+    from ..discount.models import Voucher
     from ..graphql.order.utils import OrderLineData
     from ..payment.models import Payment, TransactionItem
     from ..plugins.manager import PluginsManager
     from ..site.models import SiteSettings
+    from ..warehouse.models import Warehouse
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +89,7 @@ def get_order_country(order: Order) -> str:
     )
 
 
-def get_voucher_discount_assigned_to_order(order: Order):
+def get_voucher_discount_assigned_to_order(order: Order) -> OrderDiscount | None:
     return order.discounts.filter(type=DiscountType.VOUCHER).first()
 
 
@@ -108,7 +111,7 @@ def invalidate_order_prices(order: Order, *, save: bool = False) -> None:
         order.save(update_fields=["should_refresh_prices", "updated_at"])
 
 
-def recalculate_order_weight(order: Order, *, save: bool = False):
+def recalculate_order_weight(order: Order, *, save: bool = False) -> None:
     """Recalculate order weights.
 
     By default, no save to database is executed.
@@ -124,7 +127,7 @@ def recalculate_order_weight(order: Order, *, save: bool = False):
         order.save(update_fields=["weight", "updated_at"])
 
 
-def _calculate_quantity_including_returns(order):
+def _calculate_quantity_including_returns(order: Order) -> tuple[int, int, int, int]:
     lines = list(order.lines.all())
     total_quantity = sum([line.quantity for line in lines])
     quantity_fulfilled = sum([line.quantity_fulfilled for line in lines])
@@ -156,7 +159,7 @@ def _calculate_quantity_including_returns(order):
     )
 
 
-def refresh_order_status(order: Order):
+def refresh_order_status(order: Order) -> bool:
     """Refresh order status based on the most recent data.
 
     This function recalculates the order status using the most up-to-date information
@@ -189,7 +192,7 @@ def refresh_order_status(order: Order):
     return old_status != order.status
 
 
-def update_order_status(order: Order):
+def update_order_status(order: Order) -> None:
     """Update order status depending on fulfillments."""
     with transaction.atomic():
         # Add a transaction block to ensure that the order status won't be overridden by
@@ -212,7 +215,7 @@ def determine_order_status(
     quantity_fulfilled: int,
     quantity_returned: int,
     quantity_awaiting_approval: int,
-):
+) -> str:
     if quantity_fulfilled - quantity_awaiting_approval <= 0:
         status = OrderStatus.UNFULFILLED
     elif 0 < quantity_returned < total_quantity:
@@ -228,14 +231,15 @@ def determine_order_status(
 
 @traced_atomic_transaction()
 def create_order_line(
-    order,
-    line_data,
-    requestor,
-    site_settings,
-    allocate_stock=False,
+    order: Order,
+    line_data: "OrderLineData",
+    requestor: "App | User | None",
+    site_settings: "SiteSettings",
+    allocate_stock: bool = False,
 ) -> OrderLine:
     channel = order.channel
     variant = line_data.variant
+    assert variant is not None
     quantity = line_data.quantity
     price_override = line_data.price_override
     is_price_overridden = price_override is not None
@@ -284,7 +288,7 @@ def create_order_line(
         else None
     )
 
-    line = order.lines.create(
+    line = order.lines.create(  # type: ignore[misc] # money fields not supported by mypy_django_plugin # noqa: E501
         product_name=product_name,
         variant_name=variant_name,
         translated_product_name=translated_product_name,
@@ -408,11 +412,16 @@ def add_variant_to_order(
 
 
 def update_line_base_unit_prices_with_custom_price(
-    order, line_data, line, update_fields
-):
+    order: Order,
+    line_data: "OrderLineData",
+    line: OrderLine,
+    update_fields: list[str],
+) -> None:
     channel = order.channel
     variant = line_data.variant
+    assert variant is not None
     price_override = line_data.price_override
+    assert price_override is not None
     rules_info = line_data.rules_info
     channel_listing = variant.channel_listings.get(channel=channel)
 
@@ -446,7 +455,7 @@ def add_gift_cards_to_order(
     total_price_left: Money,
     user: User | None,
     app: Optional["App"],
-):
+) -> None:
     total_before_gift_card_compensation = total_price_left
     order_gift_cards = []
     gift_cards_to_update = []
@@ -515,7 +524,7 @@ def set_gift_card_user(
     gift_card: GiftCard,
     used_by_user: User | None,
     used_by_email: str,
-):
+) -> None:
     """Set the user, each time a giftcard is used."""
     gift_card.used_by = (
         used_by_user
@@ -533,7 +542,7 @@ def _update_allocations_for_line(
     channel: "Channel",
     requestor: "App | User | None",
     site_settings: "SiteSettings",
-):
+) -> None:
     if old_quantity == new_quantity:
         return
 
@@ -568,7 +577,7 @@ def change_order_line_quantity(
     send_event: bool = True,
     update_fields: list[str] | None = None,
     allocate_stock: bool = False,
-):
+) -> None:
     """Change the quantity of ordered items in a order line."""
     line = line_info.line
     channel = order.channel
@@ -631,7 +640,12 @@ def change_order_line_quantity(
         create_order_event(line, user, app, quantity_diff)
 
 
-def create_order_event(line, user, app, quantity_diff):
+def create_order_event(
+    line: OrderLine,
+    user: Optional["User"],
+    app: Optional["App"],
+    quantity_diff: int,
+) -> None:
     if quantity_diff > 0:
         events.order_removed_products_event(
             order=line.order,
@@ -651,15 +665,17 @@ def create_order_event(line, user, app, quantity_diff):
 
 
 def delete_order_line(
-    line_info, site_settings: "SiteSettings", requestor: "App | User | None"
-):
+    line_info: OrderLineInfo,
+    site_settings: "SiteSettings",
+    requestor: "App | User | None",
+) -> None:
     """Delete an order line from an order."""
     if line_info.line.order.is_unconfirmed():
         decrease_allocations([line_info], site_settings, requestor)
     line_info.line.delete()
 
 
-def restock_fulfillment_lines(fulfillment, warehouse):
+def restock_fulfillment_lines(fulfillment: Fulfillment, warehouse: "Warehouse") -> None:
     """Return fulfilled products to corresponding stocks.
 
     Return products to stocks and update order lines quantity fulfilled values.
@@ -674,7 +690,7 @@ def restock_fulfillment_lines(fulfillment, warehouse):
     OrderLine.objects.bulk_update(order_lines, ["quantity_fulfilled"])
 
 
-def sum_order_totals(qs, currency_code):
+def sum_order_totals(qs: QuerySet[Order], currency_code: str) -> TaxedMoney:
     totals = qs.aggregate(net=Sum("total_net_amount"), gross=Sum("total_gross_amount"))
     return TaxedMoney(
         Money(totals["net"] or 0, currency=currency_code),
@@ -682,11 +698,13 @@ def sum_order_totals(qs, currency_code):
     )
 
 
-def get_total_quantity(lines: Iterable["OrderLine"]):
+def get_total_quantity(lines: Iterable["OrderLine"]) -> int:
     return sum([line.quantity for line in lines])
 
 
-def get_discounted_lines(lines, voucher):
+def get_discounted_lines(
+    lines: Iterable[OrderLine], voucher: "Voucher"
+) -> list[OrderLine]:
     discounted_products = voucher.products.all()
     discounted_categories = set(voucher.categories.all())
     discounted_collections = set(voucher.collections.all())
@@ -694,6 +712,7 @@ def get_discounted_lines(lines, voucher):
     discounted_lines = []
     if discounted_products or discounted_collections or discounted_categories:
         for line in lines:
+            assert line.variant is not None
             line_product = line.variant.product
             line_category = line.variant.product.category
             line_collections = set(line.variant.product.collections.all())
@@ -784,7 +803,9 @@ def create_manual_order_discount(
     return order_discount
 
 
-def remove_order_discount_from_order(order: Order, order_discount: OrderDiscount):
+def remove_order_discount_from_order(
+    order: Order, order_discount: OrderDiscount
+) -> None:
     """Remove the order discount from order and update the prices."""
 
     order_discount.delete()
@@ -802,7 +823,7 @@ def update_discount_for_order_line(
     reason: str | None,
     value_type: str | None,
     value: Decimal | None,
-):
+) -> None:
     """Update discount fields for order line. Apply discount to the price."""
     line_discounts = list(order_line.discounts.all())
     _remove_invalid_discounts_for_adding_manual(line_discounts)
@@ -855,7 +876,7 @@ def update_discount_for_order_line(
 
 def _remove_invalid_discounts_for_adding_manual(
     order_line_discounts: list[OrderLineDiscount],
-):
+) -> None:
     """Remove all line discounts except the single manual line discount."""
     discount_to_delete = []
     current_manual_discount = None
@@ -891,7 +912,7 @@ def _update_order_line_discount_object(
     quantity: int,
     base_unit_price: Money,
     line_discount: OrderLineDiscount,
-):
+) -> None:
     update_fields = []
     if line_discount.value_type != value_type:
         line_discount.value_type = value_type
@@ -917,7 +938,7 @@ def _update_order_line_discount_object(
     line_discount.save(update_fields=update_fields)
 
 
-def remove_discount_from_order_line(order_line: OrderLine, order: "Order"):
+def remove_discount_from_order_line(order_line: OrderLine, order: "Order") -> None:
     """Drop discount applied to order line. Restore undiscounted price."""
     order_line.discounts.all().delete()
     update_unit_discount_data_on_order_line(order_line, [])
@@ -951,7 +972,7 @@ def remove_discount_from_order_line(order_line: OrderLine, order: "Order"):
         OrderLine.objects.bulk_update(lines, ["base_unit_price_amount"])
 
 
-def update_order_charge_status(order: Order, granted_refund_amount: Decimal):
+def update_order_charge_status(order: Order, granted_refund_amount: Decimal) -> None:
     """Update the current charge status for the order.
 
     We treat the order as overcharged when the charged amount is bigger that
@@ -983,7 +1004,7 @@ def _update_order_total_charged(
     order: Order,
     order_payments: QuerySet["Payment"],
     order_transactions: Iterable["TransactionItem"],
-):
+) -> None:
     order.total_charged_amount = sum(
         [p.captured_amount for p in order_payments], Decimal(0)
     )
@@ -995,8 +1016,8 @@ def update_order_charge_data(
     order_payments: QuerySet["Payment"] | None = None,
     order_transactions: QuerySet["TransactionItem"] | None = None,
     order_granted_refunds: QuerySet["OrderGrantedRefund"] | None = None,
-    with_save=True,
-):
+    with_save: bool = True,
+) -> None:
     if order_payments is None:
         order_payments = order.payments.all()
     if order_transactions is None:
@@ -1020,7 +1041,7 @@ def _update_order_total_authorized(
     order: Order,
     order_payments: QuerySet["Payment"],
     order_transactions: QuerySet["TransactionItem"],
-):
+) -> None:
     order.total_authorized_amount = get_total_authorized(
         order_payments, order.currency
     ).amount
@@ -1029,7 +1050,7 @@ def _update_order_total_authorized(
     )
 
 
-def update_order_authorize_status(order: Order, granted_refund_amount: Decimal):
+def update_order_authorize_status(order: Order, granted_refund_amount: Decimal) -> None:
     """Update the current authorize status for the order.
 
     The order is fully authorized when total_authorized or total_charged funds
@@ -1061,8 +1082,8 @@ def update_order_authorize_data(
     order_payments: QuerySet["Payment"] | None = None,
     order_transactions: QuerySet["TransactionItem"] | None = None,
     order_granted_refunds: QuerySet["OrderGrantedRefund"] | None = None,
-    with_save=True,
-):
+    with_save: bool = True,
+) -> None:
     if order_payments is None:
         order_payments = order.payments.all()
     if order_transactions is None:
@@ -1082,7 +1103,7 @@ def update_order_authorize_data(
         )
 
 
-def updates_amounts_for_order(order: Order, save: bool = True):
+def updates_amounts_for_order(order: Order, save: bool = True) -> None:
     order_payments = order.payments.all()
     order_transactions = order.payment_transactions.all()
     order_granted_refunds = order.granted_refunds.all()
@@ -1112,7 +1133,7 @@ def updates_amounts_for_order(order: Order, save: bool = True):
         )
 
 
-def update_order_display_gross_prices(order: "Order"):
+def update_order_display_gross_prices(order: "Order") -> None:
     """Update Order's `display_gross_prices` DB field.
 
     It gets the appropriate country code based on the current order lines and addresses.
@@ -1138,7 +1159,7 @@ def update_order_display_gross_prices(order: "Order"):
 def calculate_order_granted_refund_status(
     granted_refund: OrderGrantedRefund,
     with_save: bool = True,
-):
+) -> None:
     """Update the status for the granted refund.
 
     The status is calculated based on last transaction event related to refund action.
@@ -1174,7 +1195,9 @@ def calculate_order_granted_refund_status(
         granted_refund.save(update_fields=["status"])
 
 
-def log_address_if_validation_skipped_for_order(order: "Order", logger):
+def log_address_if_validation_skipped_for_order(
+    order: "Order", logger: logging.Logger
+) -> None:
     address = get_address_for_order_taxes(order)
     if address and address.validation_skipped:
         logger.warning(
@@ -1184,7 +1207,7 @@ def log_address_if_validation_skipped_for_order(order: "Order", logger):
         )
 
 
-def get_address_for_order_taxes(order: "Order"):
+def get_address_for_order_taxes(order: "Order") -> "Address | None":
     if order.collection_point_id:
         address = order.collection_point.address  # type: ignore[union-attr]
     else:
@@ -1192,7 +1215,7 @@ def get_address_for_order_taxes(order: "Order"):
     return address
 
 
-def order_info_for_logs(order: Order, lines: Iterable[OrderLine]):
+def order_info_for_logs(order: Order, lines: Iterable[OrderLine]) -> dict[str, object]:
     from ..discount.utils.shared import discount_info_for_logs
 
     order_id = graphene.Node.to_global_id("Order", order.id)
@@ -1258,7 +1281,9 @@ def order_info_for_logs(order: Order, lines: Iterable[OrderLine]):
     }
 
 
-def clean_order_line_quantities(order_lines, quantities_for_lines):
+def clean_order_line_quantities(
+    order_lines: Iterable[OrderLine], quantities_for_lines: Iterable[list[int]]
+) -> None:
     for order_line, line_quantities in zip(
         order_lines, quantities_for_lines, strict=False
     ):
@@ -1284,7 +1309,9 @@ def clean_order_line_quantities(order_lines, quantities_for_lines):
             )
 
 
-def store_user_addresses_from_draft_order(order, manager):
+def store_user_addresses_from_draft_order(
+    order: Order, manager: "PluginsManager"
+) -> None:
     """Save the user's billing and shipping addresses after draft order completion.
 
     This function stores the billing and shipping addresses in the customer's

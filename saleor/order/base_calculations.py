@@ -169,7 +169,7 @@ def propagate_order_discount_on_order_prices(
 def calculate_prices(
     order: "Order",
     lines: Iterable["OrderLine"],
-    assign_prices=True,
+    assign_prices: bool = True,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ) -> tuple[Money, Money]:
     """Calculate prices after applying order level discounts.
@@ -281,7 +281,7 @@ def apply_subtotal_discount_to_order_lines(
     lines: Iterable["OrderLine"],
     base_subtotal: Money,
     subtotal_discount: Money,
-):
+) -> None:
     """Calculate order lines prices after applying discounts to entire subtotal."""
     # Handle order with single line - propagate the whole discount to the single line.
     for line, total_price in propagate_order_discount_on_order_lines_prices(
@@ -290,7 +290,7 @@ def apply_subtotal_discount_to_order_lines(
         assign_order_line_prices(line, total_price)
 
 
-def assign_order_line_prices(line: "OrderLine", total_price: Money):
+def assign_order_line_prices(line: "OrderLine", total_price: Money) -> None:
     line.total_price_net = total_price
     line.total_price_gross = line.total_price_net
     line.undiscounted_total_price_gross_amount = (
@@ -314,7 +314,7 @@ def assign_order_prices(
     subtotal: Money,
     shipping_price: Money,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     shipping_price = quantize_price(shipping_price, order.currency)
     order.shipping_price_net_amount = shipping_price.amount
     order.shipping_price_gross_amount = shipping_price.amount

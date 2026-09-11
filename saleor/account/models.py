@@ -429,7 +429,7 @@ class StaffNotificationRecipient(models.Model):
     class Meta:
         ordering = ("staff_email",)
 
-    def get_email(self):
+    def get_email(self) -> str | None:
         return self.user.email if self.user else self.staff_email
 
 

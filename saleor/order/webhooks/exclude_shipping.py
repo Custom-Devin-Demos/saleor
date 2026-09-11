@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from promise import Promise
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 def generate_excluded_shipping_methods_for_order_payload(
     order: "Order",
     available_shipping_methods: list[ShippingMethodData],
-):
+) -> str:
     order_data = json.loads(generate_order_payload(order))[0]
     payload = {
         "order": order_data,
@@ -76,8 +76,12 @@ def excluded_shipping_methods_for_order(
     )
 
 
-def _get_cache_data_for_exclude_shipping_methods(order: "Order", payload: str) -> dict:
-    payload_dict = json.loads(payload)
+def _get_cache_data_for_exclude_shipping_methods(
+    order: "Order", payload: str
+) -> dict[str, Any]:
+    # `Any` values: the payload is a dynamic JSON document produced by
+    # `generate_order_payload`, so the value shapes are not statically known.
+    payload_dict: dict[str, Any] = json.loads(payload)
     source_object = payload_dict.get("order", {})
 
     # Drop fields that can be set by tax-app

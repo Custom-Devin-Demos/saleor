@@ -2,7 +2,7 @@ import binascii
 import os
 import secrets
 from dataclasses import dataclass
-from typing import Literal, NoReturn, overload
+from typing import TYPE_CHECKING, Literal, NoReturn, overload
 
 import graphene
 from django.conf import settings
@@ -15,6 +15,9 @@ from ....plugins.const import APP_ID_PREFIX
 from ....thumbnail import FILE_NAME_MAX_LENGTH
 from ....webhook.event_types import WebhookEventAsyncType
 from ..validators import validate_if_int_or_uuid
+
+if TYPE_CHECKING:
+    from django.db.models import Model
 
 
 def snake_to_camel_case(name):
