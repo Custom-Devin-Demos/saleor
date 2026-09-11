@@ -1,6 +1,3 @@
-from collections.abc import Callable
-from typing import Protocol
-
 from celery.utils.log import get_task_logger
 from django.db.models import F, Sum
 from django.db.models.functions import Coalesce
@@ -14,16 +11,7 @@ from .models import Allocation, PreorderReservation, Reservation, Stock
 task_logger = get_task_logger(__name__)
 
 
-class _TaskDecorator(Protocol):
-    def __call__[R](self, func: Callable[[], R]) -> Callable[[], R]: ...
-
-
-# Celery is untyped, so `app.task` would make the decorated tasks untyped;
-# this alias gives it a concrete signature for the argument-less tasks below.
-task: _TaskDecorator = app.task
-
-
-@task
+@app.task
 @allow_writer()
 def delete_empty_allocations_task() -> None:
     ids_to_delete = list(
@@ -34,7 +22,7 @@ def delete_empty_allocations_task() -> None:
         task_logger.debug("Removed %s allocations", count)
 
 
-@task
+@app.task
 @allow_writer()
 def delete_expired_reservations_task() -> None:
     stock_reservations, _ = Reservation.objects.filter(
@@ -52,7 +40,7 @@ def delete_expired_reservations_task() -> None:
         )
 
 
-@task
+@app.task
 @allow_writer()
 def update_stocks_quantity_allocated_task() -> None:
     stocks_to_update: list[Stock] = []
