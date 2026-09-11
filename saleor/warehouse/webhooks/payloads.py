@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 @traced_payload_generator
 def generate_product_variant_with_stock_payload(
     stocks: Iterable["Stock"], requestor: Optional["RequestorOrLazyObject"] = None
-):
+) -> str:
     serializer = PayloadSerializer()
     extra_dict_data = {
         "product_id": lambda v: graphene.Node.to_global_id(

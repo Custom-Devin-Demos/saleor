@@ -1,10 +1,10 @@
 import datetime
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from django.conf import settings
-from django.db.models import F, Sum
+from django.db.models import F, QuerySet, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -12,12 +12,16 @@ from ..core.exceptions import InsufficientStock, InsufficientStockData
 from ..core.tracing import traced_atomic_transaction
 from ..product.models import ProductVariant, ProductVariantChannelListing
 from .lock_objects import stock_qs_select_for_update
-from .management import sort_stocks
+from .management import StockValues, sort_stocks
 from .models import Allocation, PreorderReservation, Reservation
 
 if TYPE_CHECKING:
+    from django.contrib.sites.models import Site
+
+    from ..account.models import User
     from ..channel.models import Channel
-    from ..checkout.fetch import CheckoutLine
+    from ..checkout.models import CheckoutLine
+    from ..site.models import SiteSettings
 
 
 class StockData(NamedTuple):
@@ -36,9 +40,11 @@ def reserve_stocks_and_preorders(
     *,
     calculate_stocks_with_shipping_zones: bool,
     replace: bool = True,
-):
-    stock_variants, stock_lines = [], []
-    preorder_variants, preorder_lines = [], []
+) -> None:
+    stock_variants: list[ProductVariant] = []
+    stock_lines: list[CheckoutLine] = []
+    preorder_variants: list[ProductVariant] = []
+    preorder_lines: list[CheckoutLine] = []
 
     for variant in variants:
         if variant.is_preorder_active():
@@ -97,7 +103,7 @@ def reserve_stocks(
     *,
     replace: bool = True,
     calculate_stocks_with_shipping_zones: bool,
-):
+) -> None:
     """Reserve stocks for given `checkout_lines` in given country."""
     variants_ids = [line.variant_id for line in checkout_lines]
     variants = [variant for variant in variants if variant.pk in variants_ids]
@@ -109,16 +115,19 @@ def reserve_stocks(
     if not checkout_lines:
         return
 
-    stocks = list(
-        stock_qs_select_for_update()
-        .get_variants_stocks(
-            channel.slug,
-            variants,
-            country_code=country_code,
-            include_shipping_zones=calculate_stocks_with_shipping_zones,
-        )
-        .order_by("pk")
-        .values("id", "product_variant", "pk", "quantity", "warehouse_id")
+    stocks = cast(
+        list[StockValues],
+        list(
+            stock_qs_select_for_update()
+            .get_variants_stocks(
+                channel.slug,
+                variants,
+                country_code=country_code,
+                include_shipping_zones=calculate_stocks_with_shipping_zones,
+            )
+            .order_by("pk")
+            .values("id", "product_variant", "pk", "quantity", "warehouse_id")
+        ),
     )
     stocks_id = [stock.pop("id") for stock in stocks]
 
@@ -130,7 +139,7 @@ def reserve_stocks(
         .values("stock")
         .annotate(quantity_allocated_sum=Sum("quantity_allocated"))
     )
-    quantity_allocation_for_stocks: dict = defaultdict(int)
+    quantity_allocation_for_stocks: dict[int, int] = defaultdict(int)
     for allocation in quantity_allocation_list:
         quantity_allocation_for_stocks[allocation["stock"]] += allocation[
             "quantity_allocated_sum"
@@ -146,7 +155,7 @@ def reserve_stocks(
         .values("stock")
         .annotate(quantity_reserved_sum=Sum("quantity_reserved"))
     )
-    quantity_reservation_for_stocks: dict = defaultdict(int)
+    quantity_reservation_for_stocks: dict[int, int] = defaultdict(int)
     for reservation in quantity_reservation_list:
         quantity_reservation_for_stocks[reservation["stock"]] += reservation[
             "quantity_reserved_sum"
@@ -162,7 +171,9 @@ def reserve_stocks(
     variant_to_stocks: dict[int, list[StockData]] = defaultdict(list)
     for stock_data in stocks:
         variant = stock_data.pop("product_variant")
-        variant_to_stocks[variant].append(StockData(**stock_data))
+        variant_to_stocks[variant].append(
+            StockData(pk=stock_data["pk"], quantity=stock_data["quantity"])
+        )
 
     insufficient_stocks: list[InsufficientStockData] = []
     reservations: list[Reservation] = []
@@ -192,14 +203,14 @@ def _create_stock_reservations(
     line: "CheckoutLine",
     variant: "ProductVariant",
     stocks: list[StockData],
-    quantity_allocation_for_stocks: dict,
-    quantity_reservation_for_stocks: dict,
+    quantity_allocation_for_stocks: dict[int, int],
+    quantity_reservation_for_stocks: dict[int, int],
     insufficient_stocks: list[InsufficientStockData],
     reserved_until: datetime.datetime,
 ) -> tuple[list[InsufficientStockData], list[Reservation]]:
     quantity = line.quantity
     quantity_reserved = 0
-    reservations = []
+    reservations: list[Reservation] = []
     for stock_data in stocks:
         quantity_allocated_in_stock = quantity_allocation_for_stocks.get(
             stock_data.pk, 0
@@ -252,7 +263,7 @@ def reserve_preorders(
     reserved_until: datetime.datetime,
     *,
     replace: bool = True,
-):
+) -> None:
     """Reserve preorders for given `checkout_lines` in given country."""
     variants_ids = [line.variant_id for line in checkout_lines]
     variants = [variant for variant in variants if variant.pk in variants_ids]
@@ -273,7 +284,7 @@ def reserve_preorders(
         if channel_listing.channel.slug == channel_slug
     }
 
-    checkout_lines_to_reserve = []
+    checkout_lines_to_reserve: list[CheckoutLine] = []
     for line in checkout_lines:
         line_variant_channel_listing = variants_channel_listings[line.variant_id]
         if (
@@ -297,7 +308,7 @@ def reserve_preorders(
         for variant_id, channel_listings in variant_channels.items()
     }
 
-    listings_reservations: dict = get_listings_reservations(
+    listings_reservations = get_listings_reservations(
         checkout_lines, all_variants_channel_listings
     )
 
@@ -337,7 +348,7 @@ def _create_preorder_reservation(
     listings_reservations: dict[int, int],
     insufficient_stocks: list[InsufficientStockData],
     reserved_until: datetime.datetime,
-):
+) -> tuple[list[InsufficientStockData], PreorderReservation | None]:
     if listing.preorder_quantity_threshold is not None:
         available_channel_quantity = listing.available_preorder_quantity  # type: ignore[attr-defined]
         available_channel_quantity = max(
@@ -387,7 +398,7 @@ def get_checkout_lines_to_reserve(
     variants_map: dict[int, "ProductVariant"],
 ) -> Iterable["CheckoutLine"]:
     """Return checkout lines which can be reserved."""
-    valid_lines = []
+    valid_lines: list[CheckoutLine] = []
     for line in lines:
         if (
             line.quantity
@@ -398,14 +409,14 @@ def get_checkout_lines_to_reserve(
     return valid_lines
 
 
-def is_reservation_enabled(settings) -> bool:
+def is_reservation_enabled(settings: "SiteSettings") -> bool:
     return bool(
         settings.reserve_stock_duration_authenticated_user
         or settings.reserve_stock_duration_anonymous_user
     )
 
 
-def get_reservation_length(site, user) -> int | None:
+def get_reservation_length(site: "Site", user: "User | None") -> int | None:
     if user:
         return site.settings.reserve_stock_duration_authenticated_user
     return site.settings.reserve_stock_duration_anonymous_user
@@ -413,7 +424,7 @@ def get_reservation_length(site, user) -> int | None:
 
 def get_listings_reservations(
     checkout_lines: Iterable["CheckoutLine"] | None,
-    all_variants_channel_listings,
+    all_variants_channel_listings: QuerySet[ProductVariantChannelListing],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ) -> dict[int, int]:
     quantity_reservation_list = (
@@ -427,7 +438,7 @@ def get_listings_reservations(
         .values("product_variant_channel_listing")
         .annotate(quantity_reserved_sum=Sum("quantity_reserved"))
     )
-    listings_reservations: dict = defaultdict(int)
+    listings_reservations: dict[int, int] = defaultdict(int)
 
     for reservation in quantity_reservation_list:
         listings_reservations[reservation["product_variant_channel_listing"]] += (
