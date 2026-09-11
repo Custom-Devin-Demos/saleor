@@ -1,5 +1,6 @@
 import logging
 import traceback
+from collections.abc import Iterator
 from contextlib import contextmanager
 
 from django.conf import settings
@@ -30,7 +31,7 @@ class UnsafeWriterAccessError(Exception):
 
 
 @contextmanager
-def allow_writer():
+def allow_writer() -> Iterator[None]:
     """Context manager that allows write access to the default database connection.
 
     This context manager works in conjunction with the `restrict_writer_middleware` and

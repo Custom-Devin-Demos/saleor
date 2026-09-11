@@ -1,6 +1,7 @@
 """Checkout-related utility functions."""
 
 from collections.abc import Iterable
+from uuid import UUID
 
 from django.conf import settings
 from django.db.models import Exists, Q
@@ -119,7 +120,7 @@ def update_checkout_payment_statuses(
                 checkout.save(update_fields=fields_to_update)
 
 
-def update_refundable_for_checkout(checkout_pk):
+def update_refundable_for_checkout(checkout_pk: UUID) -> None:
     """Update automatically refundable status for checkout.
 
     The refundable status is calculated based on the transaction. If transaction is

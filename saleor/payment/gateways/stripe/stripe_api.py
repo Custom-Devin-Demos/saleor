@@ -1,6 +1,8 @@
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
 from decimal import Decimal
+from typing import Any
 from urllib.parse import urljoin
 
 import stripe
@@ -29,12 +31,12 @@ stripe.api_version = STRIPE_API_VERSION
 
 
 @contextmanager
-def stripe_otel_trace(span_name):
+def stripe_otel_trace(span_name: str) -> Iterator[None]:
     with otel_trace(span_name=span_name, component_name="payment"):
         yield
 
 
-def is_secret_api_key_valid(api_key: str):
+def is_secret_api_key_valid(api_key: str) -> bool:
     """Call api to check if api_key is a correct key."""
     try:
         with stripe_otel_trace("stripe.WebhookEndpoint.list"):
@@ -44,8 +46,10 @@ def is_secret_api_key_valid(api_key: str):
         return False
 
 
-def _extra_log_data(error: StripeError, payment_intent_id: str | None = None):
-    data = {
+def _extra_log_data(
+    error: StripeError, payment_intent_id: str | None = None
+) -> dict[str, str | int | None]:
+    data: dict[str, str | int | None] = {
         "error_message": error.user_message,
         "http_status": error.http_status,
         "code": error.code,
@@ -81,7 +85,7 @@ def subscribe_webhook(api_key: str, channel_slug: str) -> StripeObject | None:
             return None
 
 
-def delete_webhook(api_key: str, webhook_id: str):
+def delete_webhook(api_key: str, webhook_id: str) -> None:
     try:
         with stripe_otel_trace("stripe.WebhookEndpoint.delete"):
             stripe.WebhookEndpoint.delete(
@@ -125,14 +129,15 @@ def create_payment_intent(
     auto_capture: bool = True,
     customer: StripeObject | None = None,
     payment_method_id: str | None = None,
-    metadata: dict | None = None,
+    metadata: dict[str, str] | None = None,
     setup_future_usage: str | None = None,
     off_session: bool | None = None,
     payment_method_types: list[str] | None = None,
     customer_email: str | None = None,
 ) -> tuple[StripeObject | None, StripeError | None]:
     capture_method = AUTOMATIC_CAPTURE_METHOD if auto_capture else MANUAL_CAPTURE_METHOD
-    additional_params = {}
+    # mixed-type kwargs forwarded verbatim to the Stripe SDK
+    additional_params: dict[str, Any] = {}
 
     if customer:
         additional_params["customer"] = customer
@@ -177,7 +182,7 @@ def update_payment_method(
     api_key: str,
     payment_method_id: str,
     metadata: dict[str, str],
-):
+) -> None:
     with stripe_otel_trace("stripe.PaymentMethod.modify"):
         try:
             stripe.PaymentMethod.modify(
@@ -226,7 +231,7 @@ def retrieve_payment_intent(
 
 
 def capture_payment_intent(
-    api_key: str, payment_intent_id: str, amount_to_capture: int
+    api_key: str, payment_intent_id: str, amount_to_capture: str
 ) -> tuple[StripeObject | None, StripeError | None]:
     try:
         with stripe_otel_trace("stripe.PaymentIntent.capture"):
@@ -245,7 +250,7 @@ def capture_payment_intent(
 
 
 def refund_payment_intent(
-    api_key: str, payment_intent_id: str, amount_to_refund: int
+    api_key: str, payment_intent_id: str, amount_to_refund: str
 ) -> tuple[StripeObject | None, StripeError | None]:
     try:
         with stripe_otel_trace("stripe.Refund.create"):

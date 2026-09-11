@@ -93,11 +93,11 @@ class MoneyField(NonDatabaseFieldBase):
 
     def __init__(
         self,
-        amount_field="price_amount",
-        currency_field="price_currency",
-        verbose_name=None,
-        **kwargs,
-    ):
+        amount_field: str = "price_amount",
+        currency_field: str = "price_currency",
+        verbose_name: str | None = None,
+        **kwargs: object,
+    ) -> None:
         super().__init__(**kwargs)
         self.amount_field = amount_field
         self.currency_field = currency_field

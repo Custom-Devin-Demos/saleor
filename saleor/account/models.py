@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from functools import partial
+from typing import Any
 from uuid import uuid4
 
 from django.conf import settings
@@ -112,7 +113,7 @@ class Address(ModelWithMetadata):
 
     __hash__ = models.Model.__hash__
 
-    def as_data(self):
+    def as_data(self) -> dict[str, Any]:
         """Return the address as a dict suitable for passing as kwargs.
 
         Result does not contain the primary key or an associated user.
