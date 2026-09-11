@@ -439,7 +439,8 @@ def generate_sale_toggle_payload(
 ):
     serializer = PayloadSerializer()
 
-    extra_dict_data = {key: list(ids) for key, ids in catalogue.items()}
+    # `Any`: heterogeneous webhook payload values
+    extra_dict_data: dict[str, Any] = {key: list(ids) for key, ids in catalogue.items()}
     extra_dict_data["meta"] = generate_meta(
         requestor_data=generate_requestor(requestor)
     )

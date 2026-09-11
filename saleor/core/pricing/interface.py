@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Generic, Optional, TypeVar, Union
 
 from ...discount import DiscountType
 
@@ -17,15 +17,22 @@ if TYPE_CHECKING:
     )
 
 
+LineDiscountT = TypeVar(
+    "LineDiscountT",
+    bound=Union["OrderLineDiscount", "CheckoutLineDiscount"],
+    covariant=True,
+)
+
+
 @dataclass
-class LineInfo:
+class LineInfo(Generic[LineDiscountT]):
     line: Union["OrderLine", "CheckoutLine"]
     variant: Optional["ProductVariant"]
     product: Optional["Product"]
     product_type: Optional["ProductType"]
     collections: list["Collection"] = field(repr=False)
     channel: "Channel" = field(repr=False)
-    discounts: Iterable[Union["OrderLineDiscount", "CheckoutLineDiscount"]]
+    discounts: Iterable[LineDiscountT]
     voucher: Optional["Voucher"]
     voucher_code: str | None
 
@@ -35,7 +42,7 @@ class LineInfo:
 
     def get_promotion_discounts(
         self,
-    ):
+    ) -> list[LineDiscountT]:
         return [
             discount
             for discount in self.discounts
@@ -44,7 +51,7 @@ class LineInfo:
 
     def get_catalogue_discounts(
         self,
-    ):
+    ) -> list[LineDiscountT]:
         return [
             discount
             for discount in self.discounts
@@ -53,7 +60,7 @@ class LineInfo:
 
     def get_voucher_discounts(
         self,
-    ):
+    ) -> list[LineDiscountT]:
         return [
             discount
             for discount in self.discounts
