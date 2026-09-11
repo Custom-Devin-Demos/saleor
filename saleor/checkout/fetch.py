@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class CheckoutLineInfo(LineInfo):
+class CheckoutLineInfo(LineInfo["CheckoutLineDiscount"]):
     line: "CheckoutLine"
     variant: "ProductVariant"
     product: "Product"

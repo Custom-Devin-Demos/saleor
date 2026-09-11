@@ -114,7 +114,7 @@ def fetch_variant_rules_info(
 
 def get_rule_translations(
     promotion: "Promotion", rule: "PromotionRule", translation_language_code: str
-):
+) -> tuple[Optional["PromotionTranslation"], Optional["PromotionRuleTranslation"]]:
     promotion_translations = [
         translation
         for translation in promotion.translations.all()
