@@ -477,17 +477,17 @@ def trigger_webhooks_async_for_multiple_objects(
 
 
 def trigger_webhooks_async(
-    data,  # deprecated, legacy_data_generator should be used instead
-    event_type,
+    data: str | None,  # deprecated, legacy_data_generator should be used instead
+    event_type: str,
     webhooks,
     subscribable_object=None,
     requestor=None,
-    legacy_data_generator=None,
-    allow_replica=False,
+    legacy_data_generator: Callable[[], str] | None = None,
+    allow_replica: bool = False,
     pre_save_payloads=None,
     request_time=None,
     queue=None,
-):
+) -> None:
     """Trigger async webhooks - both regular and subscription.
 
     :param data: used as payload in regular webhooks.

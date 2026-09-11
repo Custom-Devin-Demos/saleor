@@ -1,5 +1,5 @@
 import datetime
-from typing import Union
+from typing import Self, Union
 
 from django.contrib.postgres.aggregates import StringAgg
 from django.db import models
@@ -360,7 +360,7 @@ ProductVariantManager = models.Manager.from_queryset(ProductVariantQueryset)
 
 
 class ProductVariantChannelListingQuerySet(models.QuerySet):
-    def annotate_preorder_quantity_allocated(self):
+    def annotate_preorder_quantity_allocated(self) -> Self:
         return self.annotate(
             preorder_quantity_allocated=Coalesce(
                 Sum("preorder_allocations__quantity"), 0
