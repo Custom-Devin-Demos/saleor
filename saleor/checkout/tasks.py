@@ -36,6 +36,10 @@ AUTOMATIC_COMPLETION_BATCH_SIZE = 20
 
 # Results in update time ~0.5s
 UPDATE_SEARCH_BATCH_SIZE = 100
+# celery-types declares queue as str, but Celery accepts None (default queue)
+AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME: str = (
+    settings.AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME  # type: ignore[assignment]
+)
 
 
 @app.task
@@ -199,22 +203,21 @@ def trigger_automatic_checkout_completion_task() -> None:
         domain = get_domain()
         for checkout in checkouts[:AUTOMATIC_COMPLETION_BATCH_SIZE]:
             automatic_checkout_completion_task.apply_async(
-                args=[checkout.pk],
+                args=(checkout.pk,),
                 kwargs={},
                 headers={"MessageGroupId": get_sqs_message_group_id(domain)},
             )
 
 
-# celery-types declares queue as str, but Celery accepts None (default queue)
-@app.task(  # type: ignore[call-overload]
-    queue=settings.AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME,
+@app.task(
+    queue=AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME,
     bind=True,
     default_retry_delay=60,
     retry_kwargs={"max_retries": 5},
 )
 @allow_writer()
 def automatic_checkout_completion_task(
-    self: Task,
+    self: "Task[[UUID, int | None, int | None], None]",
     checkout_pk: UUID,
     user_id: int | None = None,
     app_id: int | None = None,
