@@ -12,7 +12,8 @@ from kombu.utils.json import dumps
 class Channel(SqsChannel):
     def _put(self, queue: str, message: dict[str, Any], **kwargs):
         """Put message onto queue."""
-        q_url = self._new_queue(queue)
+        # kombu-stubs type the virtual base; SQS Channel._new_queue returns the URL
+        q_url = self._new_queue(queue)  # type: ignore[func-returns-value]
         kwargs = {"QueueUrl": q_url}
 
         if "properties" in message:
