@@ -1079,7 +1079,7 @@ def _process_payment(
 
         payment.refresh_from_db()
         if not txn.is_success:
-            raise PaymentError(txn.error)
+            raise PaymentError(txn.error or "")
     except PaymentError as e:
         _complete_checkout_fail_handler(checkout_info, manager)
         raise ValidationError(str(e), code=CheckoutErrorCode.PAYMENT_ERROR.value) from e

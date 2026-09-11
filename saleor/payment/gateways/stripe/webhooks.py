@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 @transaction_with_commit_on_errors()
 def handle_webhook(
     request: SaleorContext, gateway_config: "GatewayConfig", channel_slug: str
-):
+) -> HttpResponse:
     payload = request.body
     sig_header = request.headers["stripe-signature"]
     api_key = gateway_config.connection_params["secret_api_key"]
@@ -121,7 +121,7 @@ def _channel_slug_is_different_from_payment_channel_slug(
     return True
 
 
-def _get_payment(payment_intent_id: str, with_lock=True) -> Payment | None:
+def _get_payment(payment_intent_id: str, with_lock: bool = True) -> Payment | None:
     qs = Payment.objects.prefetch_related(
         Prefetch("checkout", queryset=Checkout.objects.select_related("channel")),
         Prefetch("order", queryset=Order.objects.select_related("channel")),
@@ -147,7 +147,7 @@ def _finalize_checkout(
     kind: str,
     amount: str,
     currency: str,
-):
+) -> None:
     gateway_response = GatewayResponse(
         kind=kind,
         action_required=False,
@@ -225,7 +225,7 @@ def _finalize_checkout(
 
 def _get_or_create_transaction(
     payment: Payment, stripe_object: StripeObject, kind: str, amount: str, currency: str
-):
+) -> Transaction:
     transaction = payment.transactions.filter(
         token=stripe_object.id,
         action_required=False,
@@ -241,7 +241,7 @@ def _get_or_create_transaction(
 
 def _update_payment_with_new_transaction(
     payment: Payment, stripe_object: StripeObject, kind: str, amount: str, currency: str
-):
+) -> Transaction:
     gateway_response = GatewayResponse(
         kind=kind,
         action_required=False,
@@ -272,7 +272,7 @@ def _process_payment_with_checkout(
     kind: str,
     amount: str,
     currency: str,
-):
+) -> None:
     _finalize_checkout(checkout, payment, payment_intent, kind, amount, currency)
 
 
@@ -290,7 +290,7 @@ def _update_payment_method_metadata(
 
 def update_payment_method_details_from_intent(
     payment: Payment, payment_intent: StripeObject
-):
+) -> None:
     if payment_method_info := get_payment_method_details(payment_intent):
         changed_fields: list[str] = []
         update_payment_method_details(payment, payment_method_info, changed_fields)
@@ -300,7 +300,7 @@ def update_payment_method_details_from_intent(
 
 def handle_authorized_payment_intent(
     payment_intent: StripeObject, gateway_config: "GatewayConfig", channel_slug: str
-):
+) -> None:
     payment = _get_payment(payment_intent.id, with_lock=False)
 
     if not payment:
@@ -360,7 +360,7 @@ def handle_authorized_payment_intent(
 
 def handle_failed_payment_intent(
     payment_intent: StripeObject, _gateway_config: "GatewayConfig", channel_slug: str
-):
+) -> None:
     payment = _get_payment(payment_intent.id)
 
     if not payment:
@@ -389,7 +389,7 @@ def handle_failed_payment_intent(
 
 def handle_processing_payment_intent(
     payment_intent: StripeObject, _gateway_config: "GatewayConfig", channel_slug: str
-):
+) -> None:
     payment = _get_payment(payment_intent.id, with_lock=False)
 
     if not payment:
@@ -430,7 +430,7 @@ def handle_processing_payment_intent(
 
 def handle_successful_payment_intent(
     payment_intent: StripeObject, gateway_config: "GatewayConfig", channel_slug: str
-):
+) -> None:
     payment = _get_payment(payment_intent.id, with_lock=False)
 
     if not payment:
@@ -499,7 +499,7 @@ def handle_successful_payment_intent(
 
 def handle_refund(
     charge: StripeObject, gateway_config: "GatewayConfig", channel_slug: str
-):
+) -> None:
     payment_intent_id = charge.payment_intent
     payment = _get_payment(payment_intent_id)
 

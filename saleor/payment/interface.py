@@ -200,7 +200,8 @@ class TransactionSessionResult:
 class PaymentMethodTokenizationBaseRequestData:
     channel: "Channel"
     user: "User"
-    data: dict | None
+    # arbitrary JSON payload forwarded to the payment app
+    data: dict[str, Any] | None
 
 
 @dataclass
@@ -338,8 +339,8 @@ class AddressData:
     country: str
     country_area: str
     phone: str
-    metadata: dict | None
-    private_metadata: dict | None
+    metadata: dict[str, str] | None
+    private_metadata: dict[str, str] | None
     validation_skipped: bool = False
 
 
@@ -395,10 +396,11 @@ class PaymentData:
     token: str | None = None
     customer_id: str | None = None  # stores payment gateway customer ID
     reuse_source: bool = False  # Note: this field will be removed in 4.0.
-    data: dict | None = None
+    # arbitrary JSON payload passed by the client to the gateway
+    data: dict[str, Any] | None = None
     graphql_customer_id: str | None = None
     checkout_token: str | None = None
-    checkout_metadata: dict | None = None
+    checkout_metadata: dict[str, str] | None = None
     store_payment_method: StorePaymentMethodEnum = StorePaymentMethodEnum.NONE
     payment_metadata: dict[str, str] = field(default_factory=dict)
     psp_reference: str | None = None
@@ -407,7 +409,9 @@ class PaymentData:
     # Optional, lazy-evaluated gateway arguments
     _resolve_lines_data: InitVar[Callable[[], PaymentLinesData]] = None
 
-    def __post_init__(self, _resolve_lines_data: Callable[[], PaymentLinesData]):
+    def __post_init__(
+        self, _resolve_lines_data: Callable[[], PaymentLinesData]
+    ) -> None:
         self.__resolve_lines_data = _resolve_lines_data
 
     # Note: this field does not appear in webhook payloads,

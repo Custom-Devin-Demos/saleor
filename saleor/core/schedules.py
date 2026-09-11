@@ -1,5 +1,5 @@
 import datetime
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 from celery.utils.time import maybe_timedelta, remaining
 from django.db.models import F, Q
@@ -30,9 +30,7 @@ class promotion_webhook_schedule(CustomSchedule):
     """
 
     def __init__(self, initial_timedelta=60, nowfun=None, app=None):
-        self.initial_timedelta: datetime.timedelta = cast(
-            datetime.timedelta, maybe_timedelta(initial_timedelta)
-        )
+        self.initial_timedelta: datetime.timedelta = maybe_timedelta(initial_timedelta)
         self.next_run: datetime.timedelta = self.initial_timedelta
         super().__init__(
             schedule=self,
@@ -143,9 +141,7 @@ class TimeBaseSchedule(CustomSchedule):
         abstract = True
 
     def __init__(self, import_path: str, initial_timedelta, nowfun=None, app=None):
-        self.initial_timedelta: datetime.timedelta = cast(
-            datetime.timedelta, maybe_timedelta(initial_timedelta)
-        )
+        self.initial_timedelta: datetime.timedelta = maybe_timedelta(initial_timedelta)
         self.next_run: datetime.timedelta = self.initial_timedelta
         super().__init__(
             schedule=self,
