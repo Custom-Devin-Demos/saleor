@@ -750,7 +750,9 @@ class ActiveReservationsByCheckoutLineIdLoader(DataLoader):
     context_key = "active_reservations_by_checkout_line_id"
 
     def batch_load(self, keys):
-        reservations_by_checkout_line = defaultdict(list)
+        reservations_by_checkout_line: defaultdict[
+            UUID, list[Reservation | PreorderReservation]
+        ] = defaultdict(list)
         queryset = (
             Reservation.objects.using(self.database_connection_name)
             .filter(checkout_line_id__in=keys)
