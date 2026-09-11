@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
 import graphene
@@ -270,8 +271,8 @@ class TransactionEventReport(DeprecatedModelMutation):
 
     @classmethod
     def clean_amount_value(
-        cls, amount: float | None, event_type: str, psp_reference: str, currency: str
-    ):
+        cls, amount: Decimal | None, event_type: str, psp_reference: str, currency: str
+    ) -> Decimal:
         if amount is None:
             if event_type not in OPTIONAL_AMOUNT_EVENTS:
                 raise ValidationError(

@@ -25,7 +25,7 @@ def snake_to_camel_case(name):
     return name
 
 
-def str_to_enum(name):
+def str_to_enum(name: str) -> str:
     """Create an enum value from a string."""
     return name.replace(" ", "_").replace("-", "_").upper()
 

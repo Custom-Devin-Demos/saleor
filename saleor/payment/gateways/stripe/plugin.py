@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse, HttpResponseNotFound
@@ -8,7 +8,11 @@ from django.http.request import split_domain_port
 from ....core.utils import get_domain
 from ....graphql.core import SaleorContext
 from ....graphql.core.enums import PluginErrorCode
-from ....plugins.base_plugin import BasePlugin, ConfigurationTypeField
+from ....plugins.base_plugin import (
+    BasePlugin,
+    ConfigurationTypeField,
+    PluginConfigurationType,
+)
 from ... import PaymentError, TransactionKind
 from ...interface import (
     CustomerSource,
@@ -106,7 +110,13 @@ class StripeGatewayPlugin(BasePlugin):
         },
     }
 
-    def __init__(self, *, configuration, **kwargs):
+    def __init__(
+        self,
+        *,
+        configuration: PluginConfigurationType,
+        # forwarded verbatim to BasePlugin.__init__
+        **kwargs: Any,
+    ) -> None:
         # Webhook details are not listed in CONFIG_STRUCTURE as user input is not
         # required here
         raw_configuration = {item["name"]: item["value"] for item in configuration}
@@ -129,7 +139,7 @@ class StripeGatewayPlugin(BasePlugin):
         )
 
     def webhook(
-        self, request: SaleorContext, path: str, previous_value
+        self, request: SaleorContext, path: str, previous_value: HttpResponse
     ) -> HttpResponse:
         config = self.config
         if not self.channel:
@@ -141,18 +151,18 @@ class StripeGatewayPlugin(BasePlugin):
         )
         return HttpResponseNotFound()
 
-    def token_is_required_as_payment_input(self, previous_value):
+    def token_is_required_as_payment_input(self, previous_value: bool) -> bool:
         if not self.active:
             return previous_value
         return False
 
-    def get_supported_currencies(self, previous_value):
+    def get_supported_currencies(self, previous_value: list[str]) -> list[str]:
         if not self.active:
             return previous_value
         return get_supported_currencies(self.config, PLUGIN_NAME)
 
     @property
-    def order_auto_confirmation(self):
+    def order_auto_confirmation(self) -> bool | None:
         if not self.channel:
             return False
         return self.channel.automatically_confirm_all_new_orders
@@ -188,7 +198,7 @@ class StripeGatewayPlugin(BasePlugin):
         return None
 
     def process_payment(
-        self, payment_information: "PaymentData", previous_value
+        self, payment_information: "PaymentData", previous_value: "GatewayResponse"
     ) -> "GatewayResponse":
         if not self.active:
             return previous_value
@@ -291,7 +301,7 @@ class StripeGatewayPlugin(BasePlugin):
         )
 
     def confirm_payment(
-        self, payment_information: "PaymentData", previous_value
+        self, payment_information: "PaymentData", previous_value: "GatewayResponse"
     ) -> "GatewayResponse":
         if not self.active:
             return previous_value
@@ -367,7 +377,7 @@ class StripeGatewayPlugin(BasePlugin):
         )
 
     def capture_payment(
-        self, payment_information: "PaymentData", previous_value
+        self, payment_information: "PaymentData", previous_value: "GatewayResponse"
     ) -> "GatewayResponse":
         if not self.active:
             return previous_value
@@ -404,7 +414,7 @@ class StripeGatewayPlugin(BasePlugin):
         )
 
     def refund_payment(
-        self, payment_information: "PaymentData", previous_value
+        self, payment_information: "PaymentData", previous_value: "GatewayResponse"
     ) -> "GatewayResponse":
         if not self.active:
             return previous_value
@@ -436,7 +446,7 @@ class StripeGatewayPlugin(BasePlugin):
         )
 
     def void_payment(
-        self, payment_information: "PaymentData", previous_value
+        self, payment_information: "PaymentData", previous_value: "GatewayResponse"
     ) -> "GatewayResponse":
         if not self.active:
             return previous_value
@@ -465,7 +475,7 @@ class StripeGatewayPlugin(BasePlugin):
         )
 
     def list_payment_sources(
-        self, customer_id: str, previous_value
+        self, customer_id: str, previous_value: list[CustomerSource]
     ) -> list[CustomerSource]:
         if not self.active:
             return previous_value
@@ -493,7 +503,9 @@ class StripeGatewayPlugin(BasePlugin):
         return previous_value
 
     @classmethod
-    def pre_save_plugin_configuration(cls, plugin_configuration: "PluginConfiguration"):
+    def pre_save_plugin_configuration(
+        cls, plugin_configuration: "PluginConfiguration"
+    ) -> None:
         configuration = plugin_configuration.configuration
         flat_configuration = {item["name"]: item for item in configuration}
 
@@ -555,8 +567,8 @@ class StripeGatewayPlugin(BasePlugin):
 
     @classmethod
     def _update_or_create_config_field(
-        cls, configuration: list[dict], field: str, value
-    ):
+        cls, configuration: PluginConfigurationType, field: str, value: str | None
+    ) -> None:
         for c_field in configuration:
             if c_field["name"] == field:
                 c_field["value"] = value
@@ -565,8 +577,11 @@ class StripeGatewayPlugin(BasePlugin):
 
     @classmethod
     def validate_plugin_configuration(
-        cls, plugin_configuration: "PluginConfiguration", **kwargs
-    ):
+        cls,
+        plugin_configuration: "PluginConfiguration",
+        # unused; mirrors the BasePlugin hook signature
+        **kwargs: Any,
+    ) -> None:
         configuration = plugin_configuration.configuration
         configuration = {item["name"]: item["value"] for item in configuration}
         required_fields = ["secret_api_key", "public_api_key"]
@@ -596,7 +611,9 @@ class StripeGatewayPlugin(BasePlugin):
                     }
                 )
 
-    def get_payment_config(self, previous_value):
+    def get_payment_config(
+        self, previous_value: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         if not self.active:
             return previous_value
         return [

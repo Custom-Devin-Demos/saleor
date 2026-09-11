@@ -5,7 +5,14 @@ import uuid
 import graphene
 from django.conf import settings
 from django.db import transaction
-from django.db.models import DateTimeField, Exists, ExpressionWrapper, OuterRef, Q
+from django.db.models import (
+    DateTimeField,
+    Exists,
+    ExpressionWrapper,
+    OuterRef,
+    Q,
+    QuerySet,
+)
 
 from ..celeryconf import app
 from ..channel.models import Channel
@@ -20,7 +27,7 @@ from .gateway import request_cancelation_action, request_refund_action
 logger = logging.getLogger(__name__)
 
 
-def transactions_to_release_funds():
+def transactions_to_release_funds() -> QuerySet[TransactionItem]:
     """Fetch transactions for checkouts eligible for automatic refunds.
 
     The function retrieves checkouts that are automatically refundable and have exceeded the
@@ -86,7 +93,7 @@ def transactions_to_release_funds():
 
 @app.task
 @allow_writer()
-def transaction_release_funds_for_checkout_task():
+def transaction_release_funds_for_checkout_task() -> None:
     TRANSACTION_BATCH_SIZE = int(settings.TRANSACTION_BATCH_FOR_RELEASING_FUNDS)
 
     # Fetch transactions that are ready to release funds
