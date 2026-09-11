@@ -453,15 +453,15 @@ class Payment(ModelWithMetadata):
     def can_authorize(self):
         return self.is_active and self.not_charged
 
-    def can_capture(self):
+    def can_capture(self) -> bool:
         if not (self.is_active and self.not_charged):
             return False
         return True
 
-    def can_void(self):
+    def can_void(self) -> bool:
         return self.not_charged and self.is_authorized
 
-    def can_refund(self):
+    def can_refund(self) -> bool:
         can_refund_charge_status = (
             ChargeStatus.PARTIALLY_CHARGED,
             ChargeStatus.FULLY_CHARGED,

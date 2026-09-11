@@ -1,8 +1,9 @@
+from collections.abc import Iterable, Iterator, Sequence
 from decimal import Decimal
 from operator import attrgetter
 from re import match
-from typing import TYPE_CHECKING, cast
-from uuid import uuid4
+from typing import TYPE_CHECKING, Self, cast
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.contrib.postgres.indexes import BTreeIndex, GinIndex
@@ -10,10 +11,12 @@ from django.contrib.postgres.search import SearchVectorField
 from django.core.validators import MinValueValidator
 from django.db import connection, models
 from django.db.models import F, JSONField, Max, Q
+from django.db.models.base import ModelBase
 from django.db.models.expressions import Exists, OuterRef
 from django.utils.timezone import now
 from django_measurement.models import MeasurementField
 from measurement.measures import Weight
+from prices import Money, TaxedMoney
 
 from ..app.models import App
 from ..channel.models import Channel
@@ -46,23 +49,23 @@ if TYPE_CHECKING:
 
 
 class OrderQueryset(models.QuerySet["Order"]):
-    def get_by_checkout_token(self, token):
+    def get_by_checkout_token(self, token: str | UUID) -> "Order | None":
         """Return non-draft order with matched checkout token."""
         return self.non_draft().filter(checkout_token=token).first()
 
-    def confirmed(self):
+    def confirmed(self) -> Self:
         """Return orders that aren't draft or unconfirmed."""
         return self.exclude(status__in=[OrderStatus.DRAFT, OrderStatus.UNCONFIRMED])
 
-    def non_draft(self):
+    def non_draft(self) -> Self:
         """Return orders that aren't draft."""
         return self.exclude(status=OrderStatus.DRAFT)
 
-    def drafts(self):
+    def drafts(self) -> Self:
         """Return draft orders."""
         return self.filter(status=OrderStatus.DRAFT)
 
-    def ready_to_fulfill(self):
+    def ready_to_fulfill(self) -> Self:
         """Return orders that can be fulfilled.
 
         Orders ready to fulfill are fully paid but unfulfilled (or partially
@@ -76,7 +79,7 @@ class OrderQueryset(models.QuerySet["Order"]):
             total_gross_amount__lte=F("total_charged_amount"),
         )
 
-    def ready_to_capture(self):
+    def ready_to_capture(self) -> Self:
         """Return orders with payments to capture.
 
         Orders ready to capture are those which are not draft or canceled and
@@ -91,7 +94,7 @@ class OrderQueryset(models.QuerySet["Order"]):
             status={OrderStatus.DRAFT, OrderStatus.CANCELED, OrderStatus.EXPIRED}
         )
 
-    def ready_to_confirm(self):
+    def ready_to_confirm(self) -> Self:
         """Return unconfirmed orders."""
         return self.filter(status=OrderStatus.UNCONFIRMED)
 
@@ -99,11 +102,11 @@ class OrderQueryset(models.QuerySet["Order"]):
 OrderManager = models.Manager.from_queryset(OrderQueryset)
 
 
-def get_order_number():
+def get_order_number() -> int:
     with connection.cursor() as cursor:
         cursor.execute("SELECT nextval('order_order_number_seq')")
         result = cursor.fetchone()
-        return result[0]
+        return cast(int, result[0])
 
 
 class Order(ModelWithMetadata, ModelWithExternalReference):
@@ -413,30 +416,30 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
             BTreeIndex(fields=["status"], name="order_status_idx"),
         ]
 
-    def is_fully_paid(self):
-        return self.total_charged >= self.total.gross
+    def is_fully_paid(self) -> bool:
+        return bool(self.total_charged >= self.total.gross)
 
-    def is_partly_paid(self):
+    def is_partly_paid(self) -> bool:
         return self.total_charged_amount > 0
 
-    def get_customer_email(self):
+    def get_customer_email(self) -> str | None:
         if self.user_email:
             return self.user_email
         if self.user_id:
             return cast("User", self.user).email
         return None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Order #{self.id!r}>"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"#{self.id}"
 
     def get_last_payment(self) -> Payment | None:
         payments: list[Payment] = list(self.payments.all())
         return max(payments, default=None, key=attrgetter("pk"))
 
-    def is_pre_authorized(self):
+    def is_pre_authorized(self) -> bool:
         return (
             self.payments.filter(
                 is_active=True,
@@ -447,7 +450,7 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
             .exists()
         )
 
-    def is_captured(self):
+    def is_captured(self) -> bool:
         return (
             self.payments.filter(
                 is_active=True,
@@ -458,34 +461,34 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
             .exists()
         )
 
-    def get_subtotal(self):
+    def get_subtotal(self) -> TaxedMoney:
         return get_subtotal(self.lines.all(), self.currency)
 
     def is_shipping_required(
         self, database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME
-    ):
+    ) -> bool:
         return any(
             line.is_shipping_required
             for line in self.lines.using(database_connection_name).all()
         )
 
-    def get_total_quantity(self):
+    def get_total_quantity(self) -> int:
         return sum([line.quantity for line in self.lines.all()])
 
-    def is_draft(self):
+    def is_draft(self) -> bool:
         return self.status == OrderStatus.DRAFT
 
-    def is_unconfirmed(self):
+    def is_unconfirmed(self) -> bool:
         return self.status == OrderStatus.UNCONFIRMED
 
-    def is_expired(self):
+    def is_expired(self) -> bool:
         return self.status == OrderStatus.EXPIRED
 
-    def is_open(self):
+    def is_open(self) -> bool:
         statuses = {OrderStatus.UNFULFILLED, OrderStatus.PARTIALLY_FULFILLED}
         return self.status in statuses
 
-    def can_cancel(self):
+    def can_cancel(self) -> bool:
         statuses_allowed_to_cancel = [
             FulfillmentStatus.CANCELED,
             FulfillmentStatus.REFUNDED,
@@ -503,7 +506,7 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
             OrderStatus.EXPIRED,
         }
 
-    def can_capture(self, payment=None):
+    def can_capture(self, payment: Payment | None = None) -> bool:
         if not payment:
             payment = self.get_last_payment()
         if not payment:
@@ -515,27 +518,29 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
         }
         return payment.can_capture() and order_status_ok
 
-    def can_void(self, payment=None):
+    def can_void(self, payment: Payment | None = None) -> bool:
         if not payment:
             payment = self.get_last_payment()
         if not payment:
             return False
         return payment.can_void()
 
-    def can_refund(self, payment=None):
+    def can_refund(self, payment: Payment | None = None) -> bool:
         if not payment:
             payment = self.get_last_payment()
         if not payment:
             return False
         return payment.can_refund()
 
-    def can_mark_as_paid(self, payments=None):
+    def can_mark_as_paid(
+        self, payments: "Sequence[Payment] | models.QuerySet[Payment] | None" = None
+    ) -> bool:
         if not payments:
             payments = self.payments.all()
         return len(payments) == 0
 
     @property
-    def total_balance(self):
+    def total_balance(self) -> Money:
         return self.total_charged - self.total.gross
 
 
@@ -736,7 +741,7 @@ class OrderLine(ModelWithMetadata):
             BTreeIndex(fields=["product_type_id"], name="product_type_id_btree_idx"),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             f"{self.product_name} ({self.variant_name})"
             if self.variant_name
@@ -744,7 +749,7 @@ class OrderLine(ModelWithMetadata):
         )
 
     @property
-    def quantity_unfulfilled(self):
+    def quantity_unfulfilled(self) -> int:
         return self.quantity - self.quantity_fulfilled
 
 
@@ -798,33 +803,45 @@ class Fulfillment(ModelWithMetadata):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Fulfillment #{self.composed_id}"
 
-    def __iter__(self):
+    def __iter__(self) -> "Iterator[FulfillmentLine]":
         return iter(self.lines.all())
 
-    def save(self, *args, **kwargs):
+    def save(
+        self,
+        *,
+        force_insert: bool | tuple[ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
         """Assign an auto incremented value as a fulfillment order."""
         if not self.pk:
             groups = self.order.fulfillments.all()
             existing_max = groups.aggregate(Max("fulfillment_order"))
             existing_max = existing_max.get("fulfillment_order__max")
             self.fulfillment_order = existing_max + 1 if existing_max is not None else 1
-        return super().save(*args, **kwargs)
+        return super().save(
+            force_insert=force_insert,
+            force_update=force_update,
+            using=using,
+            update_fields=update_fields,
+        )
 
     @property
-    def composed_id(self):
+    def composed_id(self) -> str:
         return f"{self.order.number}-{self.fulfillment_order}"
 
-    def can_edit(self):
+    def can_edit(self) -> bool:
         return self.status != FulfillmentStatus.CANCELED
 
-    def get_total_quantity(self):
+    def get_total_quantity(self) -> int:
         return sum([line.quantity for line in self.lines.all()])
 
     @property
-    def is_tracking_number_url(self):
+    def is_tracking_number_url(self) -> bool:
         return bool(match(r"^[-\w]+://", self.tracking_number))
 
 
@@ -908,7 +925,7 @@ class OrderEvent(models.Model):
             BTreeIndex(fields=["date"], name="order_orderevent_date_idx"),
         ]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(type={self.type!r}, user={self.user!r})"
 
 

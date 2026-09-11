@@ -28,7 +28,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _generate_order_lines_payload_for_tax_calculation(lines: QuerySet[OrderLine]):
+def _generate_order_lines_payload_for_tax_calculation(
+    lines: QuerySet[OrderLine],
+) -> str:
     serializer = PayloadSerializer()
 
     charge_taxes = False
@@ -69,7 +71,7 @@ def _generate_order_lines_payload_for_tax_calculation(lines: QuerySet[OrderLine]
 
 @allow_writer()
 @traced_payload_generator
-def generate_order_payload_for_tax_calculation(order: "Order"):
+def generate_order_payload_for_tax_calculation(order: "Order") -> str:
     serializer = PayloadSerializer()
 
     tax_configuration = order.channel.tax_configuration

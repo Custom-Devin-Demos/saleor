@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
@@ -14,17 +15,23 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 
-def _line_per_quantity_to_line_object(quantity, line):
+def _line_per_quantity_to_line_object(
+    quantity: int, line: OrderLine
+) -> dict[str, object]:
     return {"quantity": quantity, "line_pk": line.pk, "item": str(line)}
 
 
-def _lines_per_quantity_to_line_object_list(order_lines):
+def _lines_per_quantity_to_line_object_list(
+    order_lines: Iterable[OrderLine],
+) -> list[dict[str, object]]:
     return [
         _line_per_quantity_to_line_object(line.quantity, line) for line in order_lines
     ]
 
 
-def _get_payment_data(amount: Decimal | None, payment: Payment) -> dict:
+def _get_payment_data(
+    amount: Decimal | None, payment: Payment
+) -> dict[str, dict[str, object]]:
     return {
         "parameters": {
             "amount": amount,
@@ -40,7 +47,7 @@ def event_transaction_charge_requested(
     amount: Decimal,
     user: User | None,
     app: App | None,
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.TRANSACTION_CHARGE_REQUESTED,
@@ -59,7 +66,7 @@ def event_transaction_refund_requested(
     amount: Decimal,
     user: User | None,
     app: App | None,
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.TRANSACTION_REFUND_REQUESTED,
@@ -74,7 +81,7 @@ def event_transaction_refund_requested(
 
 def event_transaction_cancel_requested(
     order_id: "UUID", reference: str, user: User | None, app: App | None
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.TRANSACTION_CANCEL_REQUESTED,
@@ -88,7 +95,7 @@ def event_transaction_cancel_requested(
 
 def event_order_refunded_notification(
     order_id: "UUID", user_id: int | None, app_id: int | None, customer_email: str
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.EMAIL_SENT,
@@ -103,7 +110,7 @@ def event_order_refunded_notification(
 
 def event_order_confirmed_notification(
     order_id: "UUID", user_id: int | None, app_id: int | None, customer_email: str
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.EMAIL_SENT,
@@ -118,7 +125,7 @@ def event_order_confirmed_notification(
 
 def event_order_cancelled_notification(
     order_id: "UUID", user_id: int | None, app_id: int | None, customer_email: str
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.EMAIL_SENT,
@@ -133,7 +140,7 @@ def event_order_cancelled_notification(
 
 def event_order_confirmation_notification(
     order_id: "UUID", user_id: int | None, customer_email: str
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.EMAIL_SENT,
@@ -147,7 +154,7 @@ def event_order_confirmation_notification(
 
 def event_fulfillment_confirmed_notification(
     order_id: "UUID", user_id: int | None, app_id: int | None, customer_email: str
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.EMAIL_SENT,
@@ -162,7 +169,7 @@ def event_fulfillment_confirmed_notification(
 
 def event_payment_confirmed_notification(
     order_id: "UUID", user_id: int | None, customer_email: str
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order_id=order_id,
         type=OrderEvents.EMAIL_SENT,
@@ -293,7 +300,7 @@ def draft_order_created_from_replace_event(
     user: User | None,
     app: App | None,
     lines: list[OrderLine],
-):
+) -> OrderEvent:
     parameters = {
         "related_order_pk": original_order.pk,
         "lines": _lines_per_quantity_to_line_object_list(lines),
@@ -312,8 +319,8 @@ def order_created_event(
     order: Order,
     user: User | None,
     app: App | None,
-    from_draft=False,
-    automatic=False,
+    from_draft: bool = False,
+    automatic: bool = False,
 ) -> OrderEvent:
     if from_draft:
         event_type = OrderEvents.PLACED_FROM_DRAFT
@@ -488,7 +495,7 @@ def payment_failed_event(
 
 def transaction_mark_order_as_paid_failed_event(
     order: Order, user: User | None, app: App | None, message: str
-):
+) -> OrderEvent:
     parameters = {"message": message}
 
     return OrderEvent.objects.create(
@@ -524,7 +531,7 @@ def external_notification_event(
     user: User | None,
     app: App | None,
     message: str | None,
-    parameters: dict | None,
+    parameters: dict[str, object] | None,
 ) -> OrderEvent:
     parameters = parameters or {}
     parameters["message"] = message
@@ -616,7 +623,7 @@ def order_returned_event(
     user: User | None,
     app: App | None,
     returned_lines: list[tuple[int, OrderLine]],
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order=order,
         type=OrderEvents.FULFILLMENT_RETURNED,
@@ -637,7 +644,7 @@ def fulfillment_replaced_event(
     user: User | None,
     app: App | None,
     replaced_lines: list[OrderLine],
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order=order,
         type=OrderEvents.FULFILLMENT_REPLACED,
@@ -655,7 +662,7 @@ def fulfillment_refunded_event(
     refunded_lines: list[tuple[int, OrderLine]],
     amount: Decimal,
     shipping_costs_included: bool,
-):
+) -> OrderEvent:
     return OrderEvent.objects.create(
         order=order,
         type=OrderEvents.FULFILLMENT_REFUNDED,
@@ -732,8 +739,8 @@ def order_note_updated_event(
 def _prepare_discount_object(
     order_discount: "OrderDiscount",
     old_order_discount: Optional["OrderDiscount"] = None,
-):
-    discount_parameters = {
+) -> dict[str, object]:
+    discount_parameters: dict[str, object] = {
         "value": order_discount.value,
         "amount_value": order_discount.amount_value,
         "currency": order_discount.currency,
@@ -769,7 +776,7 @@ def order_discount_event(
 
 def order_discounts_automatically_updated_event(
     order: Order, changed_order_discounts: list[tuple["OrderDiscount", "OrderDiscount"]]
-):
+) -> None:
     for previous_order_discount, current_order_discount in changed_order_discounts:
         order_discount_automatically_updated_event(
             order=order,
@@ -780,7 +787,7 @@ def order_discounts_automatically_updated_event(
 
 def order_discount_automatically_updated_event(
     order: Order, order_discount: "OrderDiscount", old_order_discount: "OrderDiscount"
-):
+) -> OrderEvent:
     return order_discount_event(
         event_type=OrderEvents.ORDER_DISCOUNT_AUTOMATICALLY_UPDATED,
         order=order,
@@ -908,8 +915,8 @@ def order_line_product_removed_event(
     order: Order,
     user: User | None,
     app: App | None,
-    order_lines: list[tuple[int, OrderLine]],
-):
+    order_lines: list[OrderLine],
+) -> OrderEvent:
     return OrderEvent.objects.create(
         type=OrderEvents.ORDER_LINE_PRODUCT_DELETED,
         order=order,
@@ -923,8 +930,8 @@ def order_line_variant_removed_event(
     order: Order,
     user: User | None,
     app: App | None,
-    order_lines: list[tuple[int, OrderLine]],
-):
+    order_lines: list[OrderLine],
+) -> OrderEvent:
     return OrderEvent.objects.create(
         type=OrderEvents.ORDER_LINE_VARIANT_DELETED,
         order=order,

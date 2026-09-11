@@ -1,8 +1,9 @@
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union, cast
 
 from django.conf import settings
+from django.db.models import QuerySet
 from promise import Promise
 
 from ..shipping.interface import ExcludedShippingMethod, ShippingMethodData
@@ -102,20 +103,24 @@ def get_valid_shipping_methods_for_order(
             order, valid_methods, allow_replica=allow_replica, requestor=requestor
         )
 
-    def handle_excluded_methods(excluded_methods):
+    def handle_excluded_methods(
+        excluded_methods: list[ExcludedShippingMethod],
+    ) -> list[ShippingMethodData]:
         initialize_shipping_method_active_status(valid_methods, excluded_methods)
         return valid_methods
 
     return promised_excluded_methods.then(handle_excluded_methods)
 
 
-def get_external_shipping_id(order: "Order"):
+def get_external_shipping_id(order: "Order") -> str | None:
     if not order:
         return None
-    return order.get_value_from_private_metadata(PRIVATE_META_APP_SHIPPING_ID)
+    return cast(
+        str | None, order.get_value_from_private_metadata(PRIVATE_META_APP_SHIPPING_ID)
+    )
 
 
-def is_shipping_required(lines: Iterable["OrderLine"]):
+def is_shipping_required(lines: Iterable["OrderLine"]) -> bool:
     return any(line.is_shipping_required for line in lines)
 
 
@@ -123,7 +128,7 @@ def get_valid_collection_points_for_order(
     lines: Iterable["OrderLine"],
     channel_id: int,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> "QuerySet[Warehouse] | list[Warehouse]":
     if not is_shipping_required(lines):
         return []
 

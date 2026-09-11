@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from decimal import Decimal
 from functools import total_ordering
+from typing import overload
 
 import orjson
 from django.core import validators
@@ -53,7 +54,7 @@ class NonDatabaseFieldBase:
     one_to_many = None
     one_to_one = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.column = None
         self.primary_key = False
 
@@ -93,20 +94,27 @@ class MoneyField(NonDatabaseFieldBase):
 
     def __init__(
         self,
-        amount_field="price_amount",
-        currency_field="price_currency",
-        verbose_name=None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
+        amount_field: str = "price_amount",
+        currency_field: str = "price_currency",
+        verbose_name: str | None = None,
+    ) -> None:
+        super().__init__()
         self.amount_field = amount_field
         self.currency_field = currency_field
         self.verbose_name = verbose_name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"MoneyField(amount_field={self.amount_field}, currency_field={self.currency_field})"
 
-    def __get__(self, instance, cls=None):
+    @overload
+    def __get__(self, instance: None, cls: type | None = None) -> "MoneyField": ...
+
+    @overload
+    def __get__(self, instance: object, cls: type | None = None) -> Money: ...
+
+    def __get__(
+        self, instance: object | None, cls: type | None = None
+    ) -> "MoneyField | Money | None":
         if instance is None:
             return self
 
@@ -116,7 +124,7 @@ class MoneyField(NonDatabaseFieldBase):
             return Money(amount, currency)
         return self.get_default()
 
-    def __set__(self, instance, value):
+    def __set__(self, instance: object, value: Money | None) -> None:
         amount = None
         currency = None
         if value is not None:
@@ -125,7 +133,7 @@ class MoneyField(NonDatabaseFieldBase):
         setattr(instance, self.amount_field, amount)
         setattr(instance, self.currency_field, currency)
 
-    def get_default(self):
+    def get_default(self) -> Money | None:
         default_currency = None
         default_amount = Decimal(0)
         if hasattr(self, "model"):
@@ -144,22 +152,29 @@ class TaxedMoneyField(NonDatabaseFieldBase):
 
     def __init__(
         self,
-        net_amount_field="price_amount_net",
-        gross_amount_field="price_amount_gross",
-        currency_field="currency",
-        verbose_name=None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
+        net_amount_field: str = "price_amount_net",
+        gross_amount_field: str = "price_amount_gross",
+        currency_field: str = "currency",
+        verbose_name: str | None = None,
+    ) -> None:
+        super().__init__()
         self.net_amount_field = net_amount_field
         self.gross_amount_field = gross_amount_field
         self.currency_field = currency_field
         self.verbose_name = verbose_name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"TaxedMoneyField(net_amount_field={self.net_amount_field}, gross_amount_field={self.gross_amount_field}, currency_field={self.currency_field})"
 
-    def __get__(self, instance, cls=None):
+    @overload
+    def __get__(self, instance: None, cls: type | None = None) -> "TaxedMoneyField": ...
+
+    @overload
+    def __get__(self, instance: object, cls: type | None = None) -> TaxedMoney: ...
+
+    def __get__(
+        self, instance: object | None, cls: type | None = None
+    ) -> "TaxedMoneyField | TaxedMoney | None":
         if instance is None:
             return self
         net_amount = getattr(instance, self.net_amount_field)
@@ -169,7 +184,7 @@ class TaxedMoneyField(NonDatabaseFieldBase):
             return None
         return TaxedMoney(Money(net_amount, currency), Money(gross_amount, currency))
 
-    def __set__(self, instance, value):
+    def __set__(self, instance: object, value: TaxedMoney | None) -> None:
         net_amount = None
         gross_amount = None
         currency = None

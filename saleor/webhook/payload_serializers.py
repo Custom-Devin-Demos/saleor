@@ -1,10 +1,11 @@
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import graphene
 from django.core.serializers.json import Serializer as JSONSerializer
 from django.core.serializers.python import Serializer as PythonBaseSerializer
+from django.db.models import Model
 from django.utils.functional import SimpleLazyObject
 
 
@@ -36,16 +37,21 @@ class PythonSerializer(PythonBaseSerializer):
 
 
 class PayloadSerializer(JSONSerializer):
-    def __init__(self, extra_model_fields=None):
+    def __init__(
+        self, extra_model_fields: Mapping[str, Iterable[str]] | None = None
+    ) -> None:
         super().__init__()
         self.extra_model_fields = extra_model_fields or {}
-        self.additional_fields = {}
-        self.extra_dict_data = {}
+        # `Any`: callers pass arbitrary callables and values that end up in the
+        # dynamic JSON payload, so their shapes are not statically known.
+        self.additional_fields: dict[str, tuple[Callable[[Any], Any], list[str]]] = {}
+        self.extra_dict_data: dict[str, Any] = {}
         self.obj_id_name = "id"
         self.pk_field_name = "id"
         self.dump_type_name = True
 
-    def serialize(self, queryset, **options):
+    # `**options: Any` mirrors the django-stubs `Serializer.serialize` signature.
+    def serialize(self, queryset: Iterable[Model], **options: Any) -> str:
         self.additional_fields = options.pop("additional_fields", {})
         self.extra_dict_data = options.pop("extra_dict_data", {})
         self.obj_id_name = options.pop("obj_id_name", "id")
