@@ -14,10 +14,10 @@ from ...core.db.connection import allow_writer
 from ...core.taxes import zero_money
 from ...core.utils.promo_code import InvalidPromoCode
 from ...order.models import Order, OrderLine
-from .. import DiscountType, VoucherType
+from .. import DiscountType, DiscountValueType, VoucherType
 from ..interface import DiscountInfo, VoucherInfo
 from ..models import (
-    DiscountValueType,
+    CheckoutLineDiscount,
     NotApplicable,
     OrderLineDiscount,
     Voucher,
@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     from ...plugins.manager import PluginsManager
     from ..models import Voucher
 
+    type AnyLineInfo = LineInfo[OrderLineDiscount | CheckoutLineDiscount]
+
 
 @dataclass
 class VoucherDenormalizedInfo:
@@ -48,7 +50,7 @@ class VoucherDenormalizedInfo:
     origin_line_ids: list[UUID]
 
 
-def is_order_level_voucher(voucher: Voucher | None):
+def is_order_level_voucher(voucher: Voucher | None) -> bool:
     return bool(
         voucher
         and voucher.type == VoucherType.ENTIRE_ORDER
@@ -56,11 +58,11 @@ def is_order_level_voucher(voucher: Voucher | None):
     )
 
 
-def is_shipping_voucher(voucher: Voucher | None):
+def is_shipping_voucher(voucher: Voucher | None) -> bool:
     return bool(voucher and voucher.type == VoucherType.SHIPPING)
 
 
-def is_line_level_voucher(voucher: Voucher | None):
+def is_line_level_voucher(voucher: Voucher | None) -> Voucher | bool | None:
     return voucher and (
         voucher.type == VoucherType.SPECIFIC_PRODUCT or voucher.apply_once_per_order
     )
@@ -134,7 +136,7 @@ def release_voucher_code_usage(
     code: Optional["VoucherCode"],
     voucher: Optional["Voucher"],
     user_email: str | None,
-):
+) -> None:
     if not code:
         return
     if voucher and voucher.usage_limit:
@@ -148,8 +150,8 @@ def release_voucher_code_usage(
 def get_voucher_code_instance(
     voucher_code: str,
     channel_slug: str,
-    validate_usage_limit=True,
-):
+    validate_usage_limit: bool = True,
+) -> VoucherCode:
     """Return a voucher code instance if it's valid or raise an error."""
     if (
         Voucher.objects.active_in_channel(
@@ -174,7 +176,9 @@ def get_voucher_code_instance(
     return code_instance
 
 
-def get_active_voucher_code(voucher, channel_slug, validate_usage_limit=True):
+def get_active_voucher_code(
+    voucher: Voucher, channel_slug: str, validate_usage_limit: bool = True
+) -> VoucherCode:
     """Return an active VoucherCode instance.
 
     This method along with `Voucher.code` should be removed in Saleor 4.0.
@@ -193,16 +197,16 @@ def get_active_voucher_code(voucher, channel_slug, validate_usage_limit=True):
 
 def attach_voucher_to_line_info(
     voucher_info: "VoucherInfo",
-    lines_info: Sequence["LineInfo"],
-):
+    lines_info: Sequence["AnyLineInfo"],
+) -> None:
     """Attach voucher to valid checkout or order lines info.
 
     Apply a voucher to checkout/order line info when the voucher has the type
     SPECIFIC_PRODUCTS or is applied only to the cheapest item.
     """
     voucher = voucher_info.voucher
-    discounted_lines_by_voucher: list[LineInfo] = []
-    lines_included_in_discount = lines_info
+    discounted_lines_by_voucher: list[AnyLineInfo] = []
+    lines_included_in_discount: Sequence[AnyLineInfo] = lines_info
     if voucher.type == VoucherType.SPECIFIC_PRODUCT:
         discounted_lines_by_voucher.extend(
             get_discounted_lines(lines_info, voucher_info)
@@ -217,10 +221,10 @@ def attach_voucher_to_line_info(
             line_info.voucher_code = voucher_info.voucher_code
 
 
-def get_discounted_lines(
-    lines: Iterable["LineInfo"], voucher_info: "VoucherInfo"
-) -> Iterable["LineInfo"]:
-    discounted_lines = []
+def get_discounted_lines[LineInfoT: "AnyLineInfo"](
+    lines: Iterable[LineInfoT], voucher_info: "VoucherInfo"
+) -> Iterable[LineInfoT]:
+    discounted_lines: list[LineInfoT] = []
     if (
         voucher_info.product_pks
         or voucher_info.collection_pks
@@ -253,9 +257,9 @@ def get_discounted_lines(
     return discounted_lines
 
 
-def get_the_cheapest_line(
-    lines_info: Iterable["LineInfo"] | None,
-) -> Optional["LineInfo"]:
+def get_the_cheapest_line[LineInfoT: "AnyLineInfo"](
+    lines_info: Iterable[LineInfoT] | None,
+) -> LineInfoT | None:
     if not lines_info:
         return None
     return min(lines_info, key=lambda line_info: line_info.variant_discounted_price)
@@ -263,7 +267,7 @@ def get_the_cheapest_line(
 
 def get_customer_email_for_voucher_usage(
     source_object: Union["Order", "Checkout", "CheckoutInfo"],
-):
+) -> str | None:
     """Get customer email for voucher.
 
     Always prioritize the user's email over the email assigned to the
@@ -282,7 +286,7 @@ def validate_voucher_for_checkout(
     voucher: "Voucher",
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-):
+) -> None:
     from ...checkout import base_calculations
     from ...checkout.utils import calculate_checkout_quantity
 
@@ -306,7 +310,7 @@ def validate_voucher_for_checkout(
 
 def validate_voucher_in_order(
     order: "Order", lines: Iterable["OrderLine"], channel: "Channel"
-):
+) -> None:
     if not order.voucher:
         return
 
@@ -314,7 +318,7 @@ def validate_voucher_in_order(
 
     subtotal = order.subtotal
     quantity = get_total_quantity(lines)
-    customer_email = get_customer_email_for_voucher_usage(order)
+    customer_email = cast(str, get_customer_email_for_voucher_usage(order))
     tax_configuration = channel.tax_configuration
     prices_entered_with_tax = tax_configuration.prices_entered_with_tax
     value = subtotal.gross if prices_entered_with_tax else subtotal.net
@@ -352,8 +356,8 @@ def get_products_voucher_discount(
 
 
 def create_or_update_voucher_discount_objects_for_order(
-    order: "Order", use_denormalized_data=False
-):
+    order: "Order", use_denormalized_data: bool = False
+) -> None:
     """Handle voucher discount objects for order.
 
     Take into account all the mutual dependence and exclusivity between various types of
@@ -385,9 +389,9 @@ def create_or_update_voucher_discount_objects_for_order(
 
 
 def create_or_update_discount_object_from_order_level_voucher(
-    order,
+    order: "Order",
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     """Create or update discount object for ENTIRE_ORDER and SHIPPING voucher."""
     voucher = order.voucher
 
@@ -411,6 +415,8 @@ def create_or_update_discount_object_from_order_level_voucher(
                 order.base_shipping_price = order.undiscounted_base_shipping_price
             return
 
+    # `order.voucher_id` is set at this point, so the voucher is present
+    voucher = cast(Voucher, voucher)
     voucher_channel_listing = (
         voucher.channel_listings.using(database_connection_name)
         .filter(channel=order.channel)
@@ -482,8 +488,8 @@ def create_or_update_discount_object_from_order_level_voucher(
 
 
 def create_or_update_line_discount_objects_from_voucher(
-    lines_info, use_denormalized_data=False
-):
+    lines_info: list["EditableOrderLineInfo"], use_denormalized_data: bool = False
+) -> None:
     """Create or update line discount object for voucher applied on lines.
 
     The LineDiscount object is created for each line with voucher applied.
@@ -511,7 +517,15 @@ def create_or_update_line_discount_objects_from_voucher(
 # TODO (SHOPX-912): share the method with checkout
 def prepare_line_discount_objects_for_voucher(
     lines_info: list["EditableOrderLineInfo"],
-    use_denormalized_data=False,
+    use_denormalized_data: bool = False,
+) -> (
+    tuple[
+        list[OrderLineDiscount],
+        list[OrderLineDiscount],
+        list[OrderLineDiscount],
+        list[str],
+    ]
+    | None
 ):
     """Prepare line-level voucher discount objects to be created, updated and deleted.
 
@@ -620,7 +634,7 @@ def prepare_line_discount_objects_for_voucher(
 
 
 def calculate_line_discount_amount_from_voucher(
-    line_info: "LineInfo", total_price: Money
+    line_info: "AnyLineInfo", total_price: Money
 ) -> Money:
     """Calculate discount amount for voucher applied on line.
 
@@ -710,7 +724,7 @@ def calculate_order_line_discount_amount_from_denormalized_voucher(
 
 def _reduce_base_unit_price_for_voucher_discount(
     lines_info: list["EditableOrderLineInfo"],
-):
+) -> None:
     for line_info in lines_info:
         line = line_info.line
         base_unit_price = line_info.variant_discounted_price.amount

@@ -36,7 +36,7 @@ def get_image_or_proxy_url(
     object_type: str,
     size: int,
     format: str | None,
-):
+) -> str:
     """Return the thumbnail ULR if thumbnails is provided, otherwise the proxy url."""
     return (
         prepare_image_proxy_url(instance_id, object_type, size, format)
@@ -47,7 +47,7 @@ def get_image_or_proxy_url(
 
 def prepare_image_proxy_url(
     instance_pk: str, object_type: str, size: int, format: str | None
-):
+) -> str:
     instance_id = graphene.Node.to_global_id(object_type, instance_pk)
     kwargs = {"instance_id": instance_id, "size": size}
     if format and format.lower() != ThumbnailFormat.ORIGINAL:

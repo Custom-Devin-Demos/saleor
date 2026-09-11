@@ -1,8 +1,12 @@
+from collections.abc import Iterable
+
 from ..shipping.models import ShippingZone
 from .models import Warehouse
 
 
-def validate_warehouse_count(shipping_zones, instance: Warehouse) -> bool:
+def validate_warehouse_count(
+    shipping_zones: Iterable[ShippingZone], instance: Warehouse
+) -> bool:
     """Every ShippingZone can be assigned to only one warehouse.
 
     If not there would be issue with automatically selecting stock for operation.

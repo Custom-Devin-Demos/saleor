@@ -30,7 +30,7 @@ class UnsupportedMediaProviderException(Exception):
 
 
 class NonExistingCheckoutLines(Exception):
-    def __init__(self, line_pks: set[UUID]):
+    def __init__(self, line_pks: set[str]):
         self.line_pks = line_pks
         super().__init__("Checkout lines don't exist.")
 
@@ -50,14 +50,14 @@ class InsufficientStock(Exception):
 
 
 class AllocationError(Exception):
-    def __init__(self, order_lines):
+    def __init__(self, order_lines: list["OrderLine"]) -> None:
         lines = [str(line) for line in order_lines]
         super().__init__(f"Unable to deallocate stock for lines {', '.join(lines)}.")
         self.order_lines = order_lines
 
 
 class PreorderAllocationError(Exception):
-    def __init__(self, order_line):
+    def __init__(self, order_line: "OrderLine") -> None:
         super().__init__(f"Unable to allocate in stock for line {str(order_line)}.")
         self.order_line = order_line
 

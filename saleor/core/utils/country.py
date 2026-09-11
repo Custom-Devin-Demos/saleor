@@ -12,7 +12,7 @@ def get_active_country(
     shipping_address: Optional["Address"] = None,
     billing_address: Optional["Address"] = None,
     address_data: Optional["AddressInput"] = None,
-):
+) -> str:
     """Get country code for orders, checkouts and tax calculations.
 
     For checkouts and orders, there are following rules for determining the country

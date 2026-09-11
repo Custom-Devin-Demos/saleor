@@ -340,7 +340,7 @@ class ProductChannelListing(PublishableModel):
             BTreeIndex(fields=["discounted_price_amount"]),
         ]
 
-    def is_available_for_purchase(self):
+    def is_available_for_purchase(self) -> bool:
         return (
             self.available_for_purchase_at is not None
             and datetime.datetime.now(tz=datetime.UTC) >= self.available_for_purchase_at
@@ -391,7 +391,7 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
     def __str__(self) -> str:
         return self.name or self.sku or f"ID:{self.pk}"
 
-    def get_global_id(self):
+    def get_global_id(self) -> str:
         return graphene.Node.to_global_id("ProductVariant", self.id)
 
     def get_base_price(
@@ -436,7 +436,7 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
 
         return channel_listing.prior_price.amount
 
-    def get_weight(self):
+    def get_weight(self) -> Weight:
         return self.weight or self.product.weight or self.product.product_type.weight
 
     def is_shipping_required(self) -> bool:
@@ -448,7 +448,7 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
     def get_ordering_queryset(self):
         return self.product.variants.all()
 
-    def is_preorder_active(self):
+    def is_preorder_active(self) -> bool:
         return self.is_preorder and (
             self.preorder_end_date is None or timezone.now() <= self.preorder_end_date
         )

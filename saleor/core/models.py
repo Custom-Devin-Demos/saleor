@@ -28,7 +28,8 @@ class SortableModel(models.Model):
         existing_max = existing_max.get("sort_order__max")
         return existing_max
 
-    def save(self, *args, **kwargs):
+    # Any: positional/keyword arguments are passed through to `Model.save`.
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if self.pk is None:
             qs = self.get_ordering_queryset()
             existing_max = self.get_max_sort_order(qs)

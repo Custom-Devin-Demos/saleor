@@ -96,7 +96,7 @@ def _recalculate_base_amounts(
     pending_amount_field_name: str,
     amount_field_name: str,
     previous_amount_field_name: str | None,
-):
+) -> None:
     if _should_increase_pending_amount(request, success, failure):
         request = cast(TransactionEvent, request)
         pending_value = getattr(transaction, pending_amount_field_name)
@@ -126,7 +126,7 @@ def _recalculate_base_amounts(
 
 def _recalculate_authorization_amounts(
     transaction: TransactionItem, authorization_events: AuthorizationEvents
-):
+) -> None:
     success = authorization_events.success
     failure = authorization_events.failure
     request = authorization_events.request
@@ -150,7 +150,7 @@ def _recalculate_authorization_amounts(
 
 def _recalculate_charge_amounts(
     transaction: TransactionItem, charge_events: ChargeEvents
-):
+) -> None:
     success = charge_events.success
     failure = charge_events.failure
     request = charge_events.request
@@ -172,7 +172,7 @@ def _recalculate_charge_amounts(
 
 def _recalculate_refund_amounts(
     transaction: TransactionItem, refund_events: RefundEvents
-):
+) -> None:
     success = refund_events.success
     failure = refund_events.failure
     request = refund_events.request
@@ -195,7 +195,7 @@ def _recalculate_refund_amounts(
 
 def _recalculate_cancel_amounts(
     transaction: TransactionItem, cancel_events: CancelEvents
-):
+) -> None:
     success = cancel_events.success
     failure = cancel_events.failure
     request = cancel_events.request
@@ -234,7 +234,7 @@ def _get_authorize_events(events: Iterable[TransactionEvent]) -> list[Transactio
 
 def _handle_events_without_psp_reference(
     transaction: TransactionItem, events: list[TransactionEvent]
-):
+) -> None:
     """Calculate the amounts for event without psp reference.
 
     The events without a psp reference are the one that are reported by
@@ -314,7 +314,7 @@ def _initilize_action_map(events: Iterable[TransactionEvent]) -> ActionEventMap:
     return event_map
 
 
-def _set_transaction_amounts_to_zero(transaction: TransactionItem):
+def _set_transaction_amounts_to_zero(transaction: TransactionItem) -> None:
     transaction.authorized_value = Decimal(0)
     transaction.charged_value = Decimal(0)
     transaction.refunded_value = Decimal(0)
@@ -326,7 +326,9 @@ def _set_transaction_amounts_to_zero(transaction: TransactionItem):
     transaction.cancel_pending_value = Decimal(0)
 
 
-def calculate_transaction_amount_based_on_events(transaction: TransactionItem):
+def calculate_transaction_amount_based_on_events(
+    transaction: TransactionItem,
+) -> None:
     events: Iterable[TransactionEvent] = transaction.events.order_by(
         "created_at"
     ).exclude(include_in_calculations=False)
@@ -349,7 +351,9 @@ def calculate_transaction_amount_based_on_events(transaction: TransactionItem):
         _recalculate_cancel_amounts(transaction, cancel_events)
 
 
-def recalculate_transaction_amounts(transaction: TransactionItem, save: bool = True):
+def recalculate_transaction_amounts(
+    transaction: TransactionItem, save: bool = True
+) -> None:
     """Recalculate transaction amounts.
 
     The function calculates the transaction amounts based on the amounts that

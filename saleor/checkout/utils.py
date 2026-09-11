@@ -1,8 +1,9 @@
 """Checkout-related utility functions."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional, cast
+from logging import Logger
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 from uuid import UUID
 
 import graphene
@@ -65,12 +66,34 @@ from .lock_objects import (
 from .models import Checkout, CheckoutLine, CheckoutMetadata
 
 if TYPE_CHECKING:
+    from django.db.models import QuerySet
     from measurement.measures import Weight
 
     from ..account.models import Address
+    from ..channel.models import Channel
     from ..core.pricing.interface import LineInfo
+    from ..discount.models import CheckoutLineDiscount
     from ..order.models import OrderLine
     from .fetch import CheckoutInfo, CheckoutLineInfo
+
+
+class MetadataItemLike(Protocol):
+    key: str
+    value: str
+
+
+class CheckoutLineDataLike(Protocol):
+    variant_id: str | None
+    line_id: str | None
+    quantity: int
+    quantity_to_update: bool
+    custom_price: Decimal | None
+    custom_price_to_update: bool
+    custom_price_reason: str | None
+    custom_price_reason_to_update: bool
+
+    @property
+    def metadata_list(self) -> Sequence[MetadataItemLike]: ...
 
 
 def invalidate_checkout(
@@ -93,7 +116,7 @@ def recalculate_checkout_discounts(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
     manager: "PluginsManager",
-):
+) -> None:
     """Recalculate checkout discounts.
 
     Update line and checkout discounts from vouchers and promotions.
@@ -124,7 +147,7 @@ def invalidate_checkout_prices(
 
 def checkout_lines_bulk_update(
     lines_to_update: list["CheckoutLine"], fields_to_update: list[str]
-):
+) -> None:
     """Bulk update on CheckoutLines with lock applied on them."""
     with transaction.atomic():
         _locked_lines = list(
@@ -135,7 +158,7 @@ def checkout_lines_bulk_update(
         CheckoutLine.objects.bulk_update(lines_to_update, fields_to_update)
 
 
-def checkout_lines_bulk_delete(line_pks_to_delete: list[UUID]):
+def checkout_lines_bulk_delete(line_pks_to_delete: list[UUID]) -> None:
     """Delete CheckoutLines with lock applied on them."""
     with transaction.atomic():
         CheckoutLine.objects.filter(
@@ -164,7 +187,7 @@ def delete_checkouts(checkout_pks_to_delete: list[UUID]) -> int:
 
 def get_user_checkout(
     user: User,
-    checkout_queryset=None,
+    checkout_queryset: Optional["QuerySet[Checkout]"] = None,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ) -> Checkout | None:
     if not checkout_queryset:
@@ -172,22 +195,22 @@ def get_user_checkout(
     return checkout_queryset.filter(user=user, channel__is_active=True).first()
 
 
-def calculate_checkout_quantity(lines: list["CheckoutLineInfo"]):
+def calculate_checkout_quantity(lines: list["CheckoutLineInfo"]) -> int:
     return sum([line_info.line.quantity for line_info in lines])
 
 
 def add_variants_to_checkout(
-    checkout,
-    variants,
-    checkout_lines_data,
-    channel,
-    replace=False,
-    replace_reservations=False,
+    checkout: Checkout,
+    variants: Iterable["product_models.ProductVariant"],
+    checkout_lines_data: Iterable[CheckoutLineDataLike],
+    channel: "Channel",
+    replace: bool = False,
+    replace_reservations: bool = False,
     reservation_length: int | None = None,
-    raise_error_for_missing_lines=False,
+    raise_error_for_missing_lines: bool = False,
     *,
     calculate_stocks_with_shipping_zones: bool,
-):
+) -> Checkout:
     """Add variants to checkout.
 
     If a variant is not placed in checkout, a new checkout line will be created.
@@ -215,10 +238,12 @@ def add_variants_to_checkout(
             .filter(checkout_id=checkout.pk)
         )
         lines_by_id = {str(line.pk): line for line in checkout_lines}
-        variants_map = {str(variant.pk): variant for variant in variants}
+        variants_map: dict[str | None, product_models.ProductVariant] = {
+            str(variant.pk): variant for variant in variants
+        }
 
-        new_variant_ids = set()
-        non_existing_line_ids = set()
+        new_variant_ids: set[str | None] = set()
+        non_existing_line_ids: set[str] = set()
         for line_data in checkout_lines_data:
             if line_data.line_id and line_data.line_id not in lines_by_id:
                 non_existing_line_ids.add(line_data.line_id)
@@ -291,13 +316,21 @@ def add_variants_to_checkout(
     return checkout
 
 
-def _get_line_if_exist(line_data, lines_by_ids):
+def _get_line_if_exist(
+    line_data: CheckoutLineDataLike, lines_by_ids: dict[str, CheckoutLine]
+) -> CheckoutLine | None:
     if line_data.line_id and line_data.line_id in lines_by_ids:
         return lines_by_ids[line_data.line_id]
     return None
 
 
-def _append_line_to_update(to_update, to_delete, line_data, replace, line):
+def _append_line_to_update(
+    to_update: list[CheckoutLine],
+    to_delete: list[CheckoutLine],
+    line_data: CheckoutLineDataLike,
+    replace: bool,
+    line: CheckoutLine,
+) -> None:
     if line_data.metadata_list:
         line.store_value_in_metadata(
             {data.key: data.value for data in line_data.metadata_list}
@@ -321,7 +354,9 @@ def _append_line_to_update(to_update, to_delete, line_data, replace, line):
                 to_update.append(line)
 
 
-def _append_line_to_delete(to_delete, line_data, line):
+def _append_line_to_delete(
+    to_delete: list[CheckoutLine], line_data: CheckoutLineDataLike, line: CheckoutLine
+) -> None:
     quantity = line_data.quantity
     if line_data.quantity_to_update:
         if quantity <= 0:
@@ -329,14 +364,18 @@ def _append_line_to_delete(to_delete, line_data, line):
 
 
 def _append_line_to_create(
-    to_create,
-    checkout,
-    variant,
-    line_data,
+    to_create: list[CheckoutLine],
+    checkout: Checkout,
+    variant: "product_models.ProductVariant",
+    line_data: CheckoutLineDataLike,
     new_variant_listing_map: dict[int, "product_models.ProductVariantChannelListing"],
-):
+) -> None:
     if line_data.quantity > 0:
-        variant_listing = new_variant_listing_map.get(variant.id)
+        # Callers validate that every new variant has a listing in the channel.
+        variant_listing = cast(
+            "product_models.ProductVariantChannelListing",
+            new_variant_listing_map.get(variant.id),
+        )
         variant_price_amount = variant.get_base_price(
             variant_listing, line_data.custom_price
         ).amount
@@ -358,7 +397,9 @@ def _append_line_to_create(
         to_create.append(checkout_line)
 
 
-def _check_new_checkout_address(checkout, address, address_type):
+def _check_new_checkout_address(
+    checkout: Checkout, address: Optional["Address"], address_type: str
+) -> tuple[bool, bool]:
     """Check if and address in checkout has changed and if to remove old one."""
     if address_type == AddressType.BILLING:
         old_address = checkout.billing_address
@@ -410,7 +451,7 @@ def change_shipping_address_in_checkout(
     checkout_info: "CheckoutInfo",
     address: "Address",
     store_in_user_addresses: bool,
-):
+) -> list[str]:
     """Save shipping address in checkout if changed.
 
     Remove previously saved address if not connected to any user.
@@ -439,7 +480,7 @@ def _get_shipping_voucher_discount_for_checkout(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
     address: Optional["Address"],
-):
+) -> Money:
     """Calculate discount value for a voucher of shipping type."""
     if not is_shipping_required(lines):
         msg = "Your order does not require shipping."
@@ -462,7 +503,7 @@ def _get_shipping_voucher_discount_for_checkout(
 
 
 def get_prices_of_discounted_specific_product(
-    lines: Iterable["LineInfo"],
+    lines: Iterable["CheckoutLineInfo"],
     voucher: Voucher,
 ) -> list[Money]:
     """Get prices of variants belonging to the discounted specific products.
@@ -472,15 +513,15 @@ def get_prices_of_discounted_specific_product(
     product to child category won't work.
     """
     voucher_info = fetch_voucher_info(voucher)
-    discounted_lines: Iterable[LineInfo] = get_discounted_lines(lines, voucher_info)
+    discounted_lines = get_discounted_lines(lines, voucher_info)
     line_prices = get_base_lines_prices(discounted_lines)
 
     return line_prices
 
 
 def get_base_lines_prices(
-    lines: Iterable["LineInfo"],
-):
+    lines: Iterable["LineInfo[CheckoutLineDiscount]"],
+) -> list[Money]:
     """Get base total price of checkout lines without voucher discount applied."""
     return [
         line_info.variant_discounted_price
@@ -526,8 +567,8 @@ def get_voucher_discount_for_checkout(
 def _get_products_voucher_discount(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-    voucher,
-):
+    voucher: Voucher,
+) -> Money:
     """Calculate products discount value for a voucher, depending on its type."""
     prices = None
     if voucher.type == VoucherType.SPECIFIC_PRODUCT:
@@ -612,7 +653,7 @@ def check_voucher_for_checkout(
     manager: PluginsManager,
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-):
+) -> Money | None:
     checkout = checkout_info.checkout
     address = checkout_info.shipping_address or checkout_info.billing_address
     try:
@@ -634,7 +675,7 @@ def recalculate_checkout_discount(
     manager: PluginsManager,
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-):
+) -> None:
     """Recalculate `checkout.discount` based on the voucher.
 
     Will clear both voucher and discount if the discount is no longer
@@ -691,7 +732,7 @@ def add_promo_code_to_checkout(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
     promo_code: str,
-):
+) -> None:
     """Add gift card or voucher data to checkout.
 
     Raise InvalidPromoCode if promo code does not match to any voucher or gift card.
@@ -730,7 +771,7 @@ def add_voucher_code_to_checkout(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
     voucher_code: str,
-):
+) -> None:
     """Add voucher data to checkout by code.
 
     Raise InvalidPromoCode() if voucher of given type cannot be applied.
@@ -757,7 +798,7 @@ def add_voucher_to_checkout(
     lines: list["CheckoutLineInfo"],
     voucher: Voucher,
     voucher_code: VoucherCode,
-):
+) -> None:
     """Add voucher data to checkout.
 
     Raise NotApplicable if voucher of given type cannot be applied.
@@ -843,7 +884,7 @@ def remove_voucher_code_from_checkout_or_error(
         )
 
 
-def remove_voucher_from_checkout(checkout: Checkout):
+def remove_voucher_from_checkout(checkout: Checkout) -> None:
     """Remove voucher data from checkout."""
     checkout.voucher_code = None
     checkout.discount_name = None
@@ -866,7 +907,7 @@ def is_fully_paid(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> bool:
     """Check if provided payment methods cover the checkout's total amount.
 
     Note that these payments may not be captured or charged at all.
@@ -883,7 +924,8 @@ def is_fully_paid(
     checkout_total = max(
         checkout_total, zero_taxed_money(checkout_total.currency)
     ).gross
-    return total_paid >= checkout_total.amount
+    is_paid: bool = total_paid >= checkout_total.amount
+    return is_paid
 
 
 def cancel_active_payments(checkout: Checkout) -> list[int]:
@@ -943,7 +985,7 @@ def calculate_checkout_weight(lines: list["CheckoutLineInfo"]) -> "Weight":
     return weights
 
 
-def get_checkout_line_weight(line_info: "CheckoutLineInfo"):
+def get_checkout_line_weight(line_info: "CheckoutLineInfo") -> "Weight":
     return (
         line_info.variant.weight
         or line_info.product.weight
@@ -952,8 +994,8 @@ def get_checkout_line_weight(line_info: "CheckoutLineInfo"):
 
 
 def log_address_if_validation_skipped_for_checkout(
-    checkout_info: "CheckoutInfo", logger
-):
+    checkout_info: "CheckoutInfo", logger: Logger
+) -> None:
     address = get_address_for_checkout_taxes(checkout_info)
     if address and address.validation_skipped:
         logger.warning(
@@ -973,7 +1015,7 @@ def get_address_for_checkout_taxes(
 def checkout_info_for_logs(
     checkout_info: "CheckoutInfo",
     checkout_lines_info: list["CheckoutLineInfo"],
-):
+) -> dict[str, Any]:  # heterogeneous logging payload
     checkout = checkout_info.checkout
     checkout_id = graphene.Node.to_global_id("Checkout", checkout.pk)
     tax_configuration = checkout_info.tax_configuration
@@ -1051,8 +1093,8 @@ def log_unknown_discount_reason(
     order_lines: Iterable["OrderLine"],
     checkout_info: "CheckoutInfo",
     checkout_lines_info: list["CheckoutLineInfo"],
-    logger,
-):
+    logger: Logger,
+) -> None:
     prices_entered_with_tax = checkout_info.tax_configuration.prices_entered_with_tax
     for line in order_lines:
         discount_price = line.undiscounted_unit_price - line.unit_price

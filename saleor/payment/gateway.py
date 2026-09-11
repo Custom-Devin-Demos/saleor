@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Callable
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
 from ..account.models import User
 from ..app.models import App
@@ -23,6 +23,7 @@ from ..order.events import (
 from ..order.models import OrderGrantedRefund
 from ..payment.interface import (
     CustomerSource,
+    GatewayResponse,
     PaymentGateway,
     RefundData,
     TransactionActionData,
@@ -52,8 +53,14 @@ ERROR_MSG = "Oops! Something went wrong."
 GENERIC_TRANSACTION_ERROR = "Transaction was unsuccessful."
 
 
-def raise_payment_error(fn: Callable) -> Callable:
-    def wrapped(*args, **kwargs):
+class PaymentCallable[**P, R_co](Protocol):
+    def __call__(self, payment: Payment, *args: P.args, **kwargs: P.kwargs) -> R_co: ...
+
+
+def raise_payment_error[**P](
+    fn: Callable[P, Transaction],
+) -> Callable[P, Transaction]:
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> Transaction:
         result = fn(*args, **kwargs)
         if not result.is_success:
             raise PaymentError(result.error or GENERIC_TRANSACTION_ERROR)
@@ -62,8 +69,10 @@ def raise_payment_error(fn: Callable) -> Callable:
     return wrapped
 
 
-def payment_postprocess(fn: Callable) -> Callable:
-    def wrapped(*args, **kwargs):
+def payment_postprocess[**P](
+    fn: Callable[P, Transaction],
+) -> Callable[P, Transaction]:
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> Transaction:
         txn = fn(*args, **kwargs)
         gateway_postprocess(txn, txn.payment)
         return txn
@@ -71,8 +80,10 @@ def payment_postprocess(fn: Callable) -> Callable:
     return wrapped
 
 
-def require_active_payment(fn: Callable) -> Callable:
-    def wrapped(payment: Payment, *args, **kwargs):
+def require_active_payment[**P, R](
+    fn: PaymentCallable[P, R],
+) -> PaymentCallable[P, R]:
+    def wrapped(payment: Payment, *args: P.args, **kwargs: P.kwargs) -> R:
         if not payment.is_active:
             raise PaymentError("This payment is no longer active.")
         return fn(payment, *args, **kwargs)
@@ -80,10 +91,12 @@ def require_active_payment(fn: Callable) -> Callable:
     return wrapped
 
 
-def with_locked_payment(fn: Callable) -> Callable:
+def with_locked_payment[**P, R](
+    fn: PaymentCallable[P, R],
+) -> PaymentCallable[P, R]:
     """Lock payment to protect from asynchronous modification."""
 
-    def wrapped(payment: Payment, *args, **kwargs):
+    def wrapped(payment: Payment, *args: P.args, **kwargs: P.kwargs) -> R:
         with traced_atomic_transaction():
             payment = Payment.objects.select_for_update().get(id=payment.id)
             return fn(payment, *args, **kwargs)
@@ -99,7 +112,7 @@ def request_charge_action(
     channel_slug: str,
     user: User | None,
     app: App | None,
-):
+) -> None:
     if charge_value is None:
         charge_value = transaction.authorized_value
 
@@ -136,7 +149,7 @@ def request_refund_action(
     user: User | None,
     app: App | None,
     granted_refund: OrderGrantedRefund | None = None,
-):
+) -> None:
     if refund_value is None:
         refund_value = transaction.charged_value
 
@@ -175,7 +188,7 @@ def request_cancelation_action(
     user: User | None,
     app: App | None,
     action: str,
-):
+) -> None:
     if cancel_value is None:
         cancel_value = transaction.authorized_value
 
@@ -209,7 +222,7 @@ def _create_transaction_data(
     action_value: Decimal,
     request_event: TransactionEvent,
     granted_refund: OrderGrantedRefund | None = None,
-):
+) -> TransactionActionData:
     app_owner = None
     if transaction.app_id:
         app_owner = cast(App, transaction.app)
@@ -240,7 +253,7 @@ def _request_payment_action(
     event_type: str,
     transaction_request_func: Callable[[TransactionActionData, str], None],
     plugin_func_name: str,
-):
+) -> None:
     transaction_request_event_active = manager.is_event_active_for_any_plugin(
         plugin_func_name, channel_slug=channel_slug
     )
@@ -276,7 +289,8 @@ def process_payment(
     channel_slug: str,
     customer_id: str | None = None,
     store_source: bool = False,
-    additional_data: dict | None = None,
+    # arbitrary JSON payload passed by the client to the gateway
+    additional_data: dict[str, Any] | None = None,
 ) -> Transaction:
     payment_data = create_payment_information(
         payment=payment,
@@ -464,7 +478,8 @@ def confirm(
     payment: Payment,
     manager: "PluginsManager",
     channel_slug: str,
-    additional_data: dict | None = None,
+    # arbitrary JSON payload passed by the client to the gateway
+    additional_data: dict[str, Any] | None = None,
 ) -> Transaction:
     txn = payment.transactions.filter(
         kind=TransactionKind.ACTION_TO_CONFIRM, is_success=True
@@ -510,8 +525,11 @@ def list_gateways(
     return get_payment_gateways(manager=manager, channel_slug=channel_slug)
 
 
-def _fetch_gateway_response(fn, *args, **kwargs):
-    response, error = None, None
+def _fetch_gateway_response[**P](
+    fn: Callable[P, GatewayResponse], *args: P.args, **kwargs: P.kwargs
+) -> tuple[GatewayResponse | None, str | None]:
+    response: GatewayResponse | None = None
+    error: str | None = None
     try:
         response = fn(*args, **kwargs)
         validate_gateway_response(response)
@@ -536,7 +554,7 @@ def _get_past_transaction_token(
     return txn.token
 
 
-def _validate_refund_amount(payment: Payment, amount: Decimal):
+def _validate_refund_amount(payment: Payment, amount: Decimal) -> None:
     if amount <= 0:
         raise PaymentError("Amount should be a positive number.")
     if amount > payment.captured_amount:
@@ -548,7 +566,7 @@ def payment_refund_or_void(
     manager: "PluginsManager",
     channel_slug: str | None,
     transaction_id: str | None = None,
-):
+) -> None:
     if payment is None:
         return
     if payment.can_refund():
@@ -565,13 +583,13 @@ def payment_refund_or_void(
             not refund_transaction
             or refund_transaction.amount < payment.captured_amount
         ):
-            refund(payment, manager, channel_slug=channel_slug)
+            refund(payment, manager, channel_slug=cast(str, channel_slug))
     elif payment.can_void():
         void_transaction = _get_success_transaction(
             TransactionKind.VOID, payment, transaction_id
         )
         if not void_transaction:
-            void(payment, manager, channel_slug=channel_slug)
+            void(payment, manager, channel_slug=cast(str, channel_slug))
 
 
 def _get_success_transaction(
@@ -597,7 +615,7 @@ def get_payment_gateways(
     checkout_lines: list["CheckoutLineInfo"] | None = None,
     channel_slug: str | None = None,
     active_only: bool = True,
-):
+) -> list[PaymentGateway]:
     """Use PluginsManager to assemble list of payment gateways.
 
     Additionally, if currency is passed an additional built-in
@@ -626,7 +644,9 @@ def get_payment_gateways(
     return gateways
 
 
-def is_currency_supported(currency: str, gateway_id: str, manager: "PluginsManager"):
+def is_currency_supported(
+    currency: str, gateway_id: str, manager: "PluginsManager"
+) -> bool:
     """Return true if the given gateway supports given currency."""
     available_gateways = get_payment_gateways(manager=manager, currency=currency)
     return any(gateway.id == gateway_id for gateway in available_gateways)

@@ -497,7 +497,6 @@ class CheckoutCreate(DeprecatedModelMutation, I18nMixin):
                     variants,
                     checkout_lines_data,
                     channel,
-                    site.settings.limit_quantity_per_checkout,
                     reservation_length=get_reservation_length(
                         site=site, user=info.context.user
                     ),

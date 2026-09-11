@@ -42,7 +42,7 @@ def call_checkout_event(
     manager: "PluginsManager",
     event_name: str,
     checkout: "Checkout",
-):
+) -> None:
     if event_name not in CHECKOUT_WEBHOOK_EVENT_MAP:
         raise ValueError(f"Event {event_name} not found in CHECKOUT_WEBHOOK_EVENT_MAP.")
 
@@ -57,7 +57,7 @@ def call_checkout_events(
     manager: "PluginsManager",
     event_names: list[str],
     checkout: "Checkout",
-):
+) -> None:
     missing_events = set(event_names).difference(CHECKOUT_WEBHOOK_EVENT_MAP.keys())
     if missing_events:
         raise ValueError(
@@ -96,7 +96,7 @@ def call_checkout_info_event(
 
 def update_last_transaction_modified_at_for_checkout(
     checkout: Checkout, transaction: TransactionItem
-):
+) -> None:
     if (
         not checkout.last_transaction_modified_at
         or checkout.last_transaction_modified_at < transaction.modified_at
@@ -111,7 +111,7 @@ def transaction_amounts_for_checkout_updated(
     manager: "PluginsManager",
     user: Optional["User"],
     app: Optional["App"],
-):
+) -> None:
     lines, _ = fetch_checkout_lines(checkout)
     checkout_info = fetch_checkout_info(checkout, lines, manager)
     previous_charge_status = checkout_info.checkout.charge_status
@@ -137,7 +137,7 @@ def transaction_amounts_for_checkout_updated_without_price_recalculation(
     manager: "PluginsManager",
     user: Optional["User"],
     app: Optional["App"],
-):
+) -> None:
     lines, _ = fetch_checkout_lines(checkout)
     checkout_info = fetch_checkout_info(checkout, lines, manager)
     previous_charge_status = checkout_info.checkout.charge_status
@@ -178,7 +178,7 @@ def _transaction_amounts_for_checkout_updated(
     manager: "PluginsManager",
     user: Optional["User"],
     app: Optional["App"],
-):
+) -> None:
     checkout = checkout_info.checkout
 
     previous_charge_status_is_fully_paid = previous_charge_status in [

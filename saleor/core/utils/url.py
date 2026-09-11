@@ -8,7 +8,7 @@ from django.http.request import split_domain_port, validate_host
 from . import build_absolute_uri
 
 
-def validate_storefront_url(url):
+def validate_storefront_url(url: str) -> None:
     """Validate the storefront URL.
 
     Raise ValidationError if URL isn't in RFC 1808 format

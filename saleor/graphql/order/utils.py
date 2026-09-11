@@ -42,7 +42,7 @@ class OrderLineData:
     line_id: str | None = None
     price_override: Decimal | None = None
     quantity: int = 0
-    rules_info: Iterable[VariantPromotionRuleInfo] | None = None
+    rules_info: list[VariantPromotionRuleInfo] | None = None
 
 
 def validate_total_quantity(lines: Iterable["OrderLine"], errors: T_ERRORS):

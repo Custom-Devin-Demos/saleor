@@ -1004,7 +1004,7 @@ def test_trigger_automatic_checkout_completion_task_with_eligible_checkouts(
     # then
     assert mocked_automatic_checkout_completion.call_count == 1
     mocked_automatic_checkout_completion.assert_called_once_with(
-        args=[checkout_with_prices.token],
+        args=(checkout_with_prices.token,),
         kwargs={},
         headers={"MessageGroupId": mock.ANY},
     )

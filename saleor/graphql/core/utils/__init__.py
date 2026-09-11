@@ -2,11 +2,12 @@ import binascii
 import os
 import secrets
 from dataclasses import dataclass
-from typing import Literal, NoReturn, overload
+from typing import TYPE_CHECKING, Literal, NoReturn, overload
 
 import graphene
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db.models import Model
 from graphene import ObjectType
 from graphql import GraphQLError
 
@@ -14,6 +15,9 @@ from ....plugins.const import APP_ID_PREFIX
 from ....thumbnail import FILE_NAME_MAX_LENGTH
 from ....webhook.event_types import WebhookEventAsyncType
 from ..validators import validate_if_int_or_uuid
+
+if TYPE_CHECKING:
+    from django.db.models import Model
 
 
 def snake_to_camel_case(name):
@@ -24,7 +28,7 @@ def snake_to_camel_case(name):
     return name
 
 
-def str_to_enum(name):
+def str_to_enum(name: str) -> str:
     """Create an enum value from a string."""
     return name.replace(" ", "_").replace("-", "_").upper()
 
@@ -107,7 +111,7 @@ def from_global_id_or_none(
     return from_global_id_or_error(global_id, only_type, raise_error)[1]
 
 
-def to_global_id_or_none(instance):
+def to_global_id_or_none(instance: Model | None) -> str | None:
     class_name = instance.__class__.__name__
     if instance is None or instance.pk is None:
         return None

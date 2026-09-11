@@ -2971,7 +2971,7 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
                 and last_payment.charge_status == ChargeStatus.FULLY_REFUNDED
             )
 
-            if payment_is_active or payment_is_fully_refunded:
+            if last_payment and (payment_is_active or payment_is_fully_refunded):
                 return (
                     TransactionByPaymentIdLoader(info.context)
                     .load(last_payment.id)

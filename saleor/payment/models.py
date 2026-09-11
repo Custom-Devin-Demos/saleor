@@ -386,19 +386,19 @@ class Payment(ModelWithMetadata):
             GinIndex(fields=["order_id", "is_active", "charge_status"]),
         ]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"Payment(gateway={self.gateway}, is_active={self.is_active}, "
             f"created={self.created_at}, charge_status={self.charge_status})"
         )
 
-    def get_last_transaction(self):
+    def get_last_transaction(self) -> "Transaction | None":
         return max(self.transactions.all(), default=None, key=attrgetter("pk"))
 
-    def get_total(self):
+    def get_total(self) -> Money:
         return Money(self.total, self.currency)
 
-    def get_authorized_amount(self):
+    def get_authorized_amount(self) -> Money:
         money = zero_money(self.currency)
 
         # Query all the transactions which should be prefetched
@@ -430,15 +430,15 @@ class Payment(ModelWithMetadata):
         # the authorized amount should exclude the already captured amount here
         return money
 
-    def get_captured_amount(self):
+    def get_captured_amount(self) -> Money:
         return Money(self.captured_amount, self.currency)
 
-    def get_charge_amount(self):
+    def get_charge_amount(self) -> Decimal:
         """Retrieve the maximum capture possible."""
         return self.total - self.captured_amount
 
     @property
-    def is_authorized(self):
+    def is_authorized(self) -> bool:
         return any(
             txn.kind == TransactionKind.AUTH
             and txn.is_success
@@ -447,21 +447,21 @@ class Payment(ModelWithMetadata):
         )
 
     @property
-    def not_charged(self):
+    def not_charged(self) -> bool:
         return self.charge_status == ChargeStatus.NOT_CHARGED
 
-    def can_authorize(self):
+    def can_authorize(self) -> bool:
         return self.is_active and self.not_charged
 
-    def can_capture(self):
+    def can_capture(self) -> bool:
         if not (self.is_active and self.not_charged):
             return False
         return True
 
-    def can_void(self):
+    def can_void(self) -> bool:
         return self.not_charged and self.is_authorized
 
-    def can_refund(self):
+    def can_refund(self) -> bool:
         can_refund_charge_status = (
             ChargeStatus.PARTIALLY_CHARGED,
             ChargeStatus.FULLY_CHARGED,
@@ -469,10 +469,10 @@ class Payment(ModelWithMetadata):
         )
         return self.charge_status in can_refund_charge_status
 
-    def can_confirm(self):
+    def can_confirm(self) -> bool:
         return self.is_active and self.not_charged
 
-    def is_manual(self):
+    def is_manual(self) -> bool:
         return self.gateway == CustomPaymentChoices.MANUAL
 
 
@@ -517,11 +517,11 @@ class Transaction(models.Model):
             ),
         ]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"Transaction(type={self.kind}, is_success={self.is_success}, "
             f"created={self.created_at})"
         )
 
-    def get_amount(self):
+    def get_amount(self) -> Money:
         return Money(self.amount, self.currency)

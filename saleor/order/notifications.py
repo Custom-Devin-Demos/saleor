@@ -19,18 +19,24 @@ from ..attribute.models import (
 from ..core.notification.utils import get_site_context
 from ..core.notify import NotifyEventType, NotifyHandler
 from ..core.prices import quantize_price, quantize_price_fields
-from ..core.utils.url import build_absolute_uri, prepare_url
+from ..core.utils import build_absolute_uri
+from ..core.utils.url import prepare_url
 from ..discount import DiscountType
 from ..graphql.core.utils import to_global_id_or_none
 from ..product import ProductMediaTypes
 from ..product.models import Product, ProductMedia, ProductVariant
 from ..thumbnail import THUMBNAIL_SIZES
 from ..thumbnail.utils import get_image_or_proxy_url
-from .models import FulfillmentLine, Order, OrderLine
+from .models import Fulfillment, FulfillmentLine, Order, OrderLine
 
 if TYPE_CHECKING:
-    from ..account.models import User  # noqa: F401
+    from ..account.models import Address, User  # noqa: F401
     from ..app.models import App
+    from ..plugins.manager import PluginsManager
+    from .fetch import OrderInfo
+
+# Notification payloads are free-form JSON dictionaries consumed by plugins/webhooks.
+Payload = dict[str, object]
 
 
 @dataclass
@@ -50,8 +56,10 @@ def get_attribute_data_from_order_lines(lines: Iterable["OrderLine"]) -> Attribu
         .filter(product_id__in=product_ids)
         .values_list("product_id", "value_id")
     )
-    assigned_product_attribute_values_map = defaultdict(list)
-    attribute_value_ids = set()
+    assigned_product_attribute_values_map: defaultdict[int, list[int]] = defaultdict(
+        list
+    )
+    attribute_value_ids: set[int] = set()
     for product_id, value_id in assigned_product_attribute_values:
         attribute_value_ids.add(value_id)
         assigned_product_attribute_values_map[product_id].append(value_id)
@@ -69,8 +77,8 @@ def get_attribute_data_from_order_lines(lines: Iterable["OrderLine"]) -> Attribu
     attribute_products = AttributeProduct.objects.filter(
         product_type_id__in=product_type_ids
     ).values_list("product_type_id", "attribute_id")
-    attribute_ids = set()
-    product_type_id_to_attribute_id_map = defaultdict(list)
+    attribute_ids: set[int] = set()
+    product_type_id_to_attribute_id_map: defaultdict[int, list[int]] = defaultdict(list)
     for product_type_id, attribute_id in attribute_products:
         attribute_ids.add(attribute_id)
         product_type_id_to_attribute_id_map[product_type_id].append(attribute_id)
@@ -85,7 +93,7 @@ def get_attribute_data_from_order_lines(lines: Iterable["OrderLine"]) -> Attribu
     )
 
 
-def get_image_payload(instance: ProductMedia):
+def get_image_payload(instance: ProductMedia) -> dict[str, str]:
     return {
         # This is temporary solution, the get_product_image_thumbnail_url
         # should be optimize - we should fetch all thumbnails at once instead of
@@ -97,7 +105,7 @@ def get_image_payload(instance: ProductMedia):
     }
 
 
-def get_default_images_payload(images: list[ProductMedia]):
+def get_default_images_payload(images: list[ProductMedia]) -> Payload:
     first_image_payload = None
     first_image = images[0] if images else None
     if first_image:
@@ -108,7 +116,9 @@ def get_default_images_payload(images: list[ProductMedia]):
     return {"first_image": first_image_payload, "images": images_payload}
 
 
-def get_product_attributes_payload(product, attribute_data: AttributeData):
+def get_product_attributes_payload(
+    product: Product, attribute_data: AttributeData
+) -> list[Payload]:
     attribute_ids = attribute_data.product_type_id_to_attribute_id_map.get(
         product.product_type.id, []
     )
@@ -127,11 +137,11 @@ def get_product_attributes_payload(product, attribute_data: AttributeData):
         if value_id in attribute_data.attribute_value_map
     ]
 
-    values_map = defaultdict(list)
+    values_map: defaultdict[int, list[AttributeValue]] = defaultdict(list)
     for value in attribute_values:
         values_map[value.attribute_id].append(value)
 
-    attributes_payload = []
+    attributes_payload: list[Payload] = []
     for attribute in attributes:
         attr = attribute
         attributes_payload.append(
@@ -156,7 +166,7 @@ def get_product_attributes_payload(product, attribute_data: AttributeData):
     return attributes_payload
 
 
-def get_product_payload(product: Product, attribute_data: AttributeData):
+def get_product_payload(product: Product, attribute_data: AttributeData) -> Payload:
     all_media = product.media.all()
     images = [media for media in all_media if media.type == ProductMediaTypes.IMAGE]
     return {
@@ -167,7 +177,7 @@ def get_product_payload(product: Product, attribute_data: AttributeData):
     }
 
 
-def get_product_variant_payload(variant: ProductVariant):
+def get_product_variant_payload(variant: ProductVariant) -> Payload:
     all_media = variant.media.all()
     images = [media for media in all_media if media.type == ProductMediaTypes.IMAGE]
     return {
@@ -180,8 +190,8 @@ def get_product_variant_payload(variant: ProductVariant):
     }
 
 
-def get_order_line_payload(line: "OrderLine", attribute_data: AttributeData):
-    variant_dependent_fields = {}
+def get_order_line_payload(line: "OrderLine", attribute_data: AttributeData) -> Payload:
+    variant_dependent_fields: dict[str, Payload] = {}
     if line.variant:
         variant_dependent_fields = {
             "product": get_product_payload(line.variant.product, attribute_data),
@@ -222,8 +232,8 @@ def get_order_line_payload(line: "OrderLine", attribute_data: AttributeData):
 
 def get_lines_payload(
     order_lines: Iterable["OrderLine"], attribute_data: AttributeData
-):
-    payload = []
+) -> list[Payload]:
+    payload: list[Payload] = []
     for line in order_lines:
         payload.append(get_order_line_payload(line, attribute_data))
     return payload
@@ -244,22 +254,22 @@ ADDRESS_MODEL_FIELDS = [
 ]
 
 
-def get_address_payload(address):
+def get_address_payload(address: "Address | None") -> Payload | None:
     if not address:
         return None
-    address = model_to_dict(address, fields=ADDRESS_MODEL_FIELDS)
-    address["country"] = str(address["country"])
-    address["phone"] = str(address["phone"])
-    return address
+    address_payload: Payload = model_to_dict(address, fields=ADDRESS_MODEL_FIELDS)
+    address_payload["country"] = str(address_payload["country"])
+    address_payload["phone"] = str(address_payload["phone"])
+    return address_payload
 
 
-def get_discounts_payload(order):
+def get_discounts_payload(order: Order) -> Payload:
     order_discounts = order.discounts.all()
-    voucher_discount = None
-    all_discounts = []
-    discount_amount = 0
+    voucher_discount: Payload | None = None
+    all_discounts: list[Payload] = []
+    discount_amount = Decimal(0)
     for order_discount in order_discounts:
-        dicount_obj = {
+        dicount_obj: Payload = {
             "type": order_discount.type,
             "value_type": order_discount.value_type,
             "value": order_discount.value,
@@ -302,8 +312,8 @@ ORDER_PRICE_FIELDS = [
 ]
 
 
-def get_custom_order_payload(order: Order):
-    payload = {
+def get_custom_order_payload(order: Order) -> Payload:
+    payload: Payload = {
         "order": get_default_order_payload(order),
         "recipient_email": order.get_customer_email(),
         **get_site_context(),
@@ -313,10 +323,10 @@ def get_custom_order_payload(order: Order):
 
 def get_default_order_payload(
     order: "Order",
-    redirect_url: str = "",
+    redirect_url: str | None = "",
     lines: Iterable["OrderLine"] | None = None,
     attribute_data: AttributeData | None = None,
-):
+) -> Payload:
     order_details_url = ""
     if redirect_url:
         order_details_url = prepare_order_details_url(order, redirect_url)
@@ -334,7 +344,7 @@ def get_default_order_payload(
 
     currency = order.currency
     quantize_price_fields(order, fields=ORDER_PRICE_FIELDS, currency=currency)
-    order_payload = model_to_dict(order, fields=ORDER_MODEL_FIELDS)
+    order_payload: Payload = model_to_dict(order, fields=ORDER_MODEL_FIELDS)
     order_payload.update(
         {
             "id": to_global_id_or_none(order),
@@ -365,7 +375,7 @@ def get_default_order_payload(
 
 def get_default_fulfillment_line_payload(
     line: "FulfillmentLine", attribute_data: AttributeData
-):
+) -> Payload:
     return {
         "id": to_global_id_or_none(line),
         "order_line": get_order_line_payload(line.order_line, attribute_data),
@@ -373,7 +383,7 @@ def get_default_fulfillment_line_payload(
     }
 
 
-def get_default_fulfillment_payload(order, fulfillment):
+def get_default_fulfillment_payload(order: Order, fulfillment: Fulfillment) -> Payload:
     lines = fulfillment.lines.prefetch_related(
         "order_line__variant__media",
         "order_line__variant__product__media",
@@ -383,7 +393,7 @@ def get_default_fulfillment_payload(order, fulfillment):
         [line.order_line for line in lines]
     )
 
-    payload = {
+    payload: Payload = {
         "order": get_default_order_payload(
             order, order.redirect_url, attribute_data=attribute_data
         ),
@@ -405,11 +415,13 @@ def prepare_order_details_url(order: Order, redirect_url: str) -> str:
     return prepare_url(params, redirect_url)
 
 
-def send_order_confirmation(order_info, redirect_url, manager):
+def send_order_confirmation(
+    order_info: "OrderInfo", redirect_url: str | None, manager: "PluginsManager"
+) -> None:
     """Send notification with order confirmation."""
 
-    def _generate_payload():
-        payload = {
+    def _generate_payload() -> Payload:
+        payload: Payload = {
             "order": get_default_order_payload(order_info.order, redirect_url),
             "recipient_email": order_info.customer_email,
             **get_site_context(),
@@ -432,7 +444,7 @@ def send_order_confirmation(order_info, redirect_url, manager):
     ]
     if recipient_emails:
 
-        def _generate_staff_payload():
+        def _generate_staff_payload() -> Payload:
             payload = _generate_payload()
             payload = {
                 "order": payload["order"],
@@ -447,11 +459,16 @@ def send_order_confirmation(order_info, redirect_url, manager):
         )
 
 
-def send_order_confirmed(order, user, app, manager):
+def send_order_confirmed(
+    order: Order,
+    user: Optional["User"],
+    app: Optional["App"],
+    manager: "PluginsManager",
+) -> None:
     """Send email which tells customer that order has been confirmed."""
 
-    def _generate_payload():
-        payload = {
+    def _generate_payload() -> Payload:
+        payload: Payload = {
             "order": get_default_order_payload(order, order.redirect_url),
             "recipient_email": order.get_customer_email(),
             **get_site_context(),
@@ -467,8 +484,14 @@ def send_order_confirmed(order, user, app, manager):
     )
 
 
-def send_fulfillment_confirmation_to_customer(order, fulfillment, user, app, manager):
-    def _generate_payload():
+def send_fulfillment_confirmation_to_customer(
+    order: Order,
+    fulfillment: Fulfillment,
+    user: Optional["User"],
+    app: Optional["App"],
+    manager: "PluginsManager",
+) -> None:
+    def _generate_payload() -> Payload:
         _payload = get_default_fulfillment_payload(order, fulfillment)
         attach_requester_payload_data(_payload, user, app)
         return _payload
@@ -482,7 +505,9 @@ def send_fulfillment_confirmation_to_customer(order, fulfillment, user, app, man
     )
 
 
-def send_fulfillment_update(order, fulfillment, manager):
+def send_fulfillment_update(
+    order: Order, fulfillment: Fulfillment, manager: "PluginsManager"
+) -> None:
     handler = NotifyHandler(
         partial(get_default_fulfillment_payload, order, fulfillment)
     )
@@ -493,12 +518,14 @@ def send_fulfillment_update(order, fulfillment, manager):
     )
 
 
-def send_payment_confirmation(order_info, manager):
+def send_payment_confirmation(
+    order_info: "OrderInfo", manager: "PluginsManager"
+) -> None:
     """Send notification with the payment confirmation."""
 
-    def _generate_payload():
+    def _generate_payload() -> Payload:
         payment = order_info.payment
-        payload = {
+        payload: Payload = {
             "order": get_default_order_payload(order_info.order),
             "recipient_email": order_info.customer_email,
             **get_site_context(),
@@ -530,10 +557,13 @@ def send_payment_confirmation(order_info, manager):
 
 
 def send_order_canceled_confirmation(
-    order: "Order", user: Optional["User"], app: Optional["App"], manager
-):
-    def _generate_payload():
-        payload = {
+    order: "Order",
+    user: Optional["User"],
+    app: Optional["App"],
+    manager: "PluginsManager",
+) -> None:
+    def _generate_payload() -> Payload:
+        payload: Payload = {
             "order": get_default_order_payload(order),
             "recipient_email": order.get_customer_email(),
             **get_site_context(),
@@ -555,10 +585,10 @@ def send_order_refunded_confirmation(
     app: Optional["App"],
     amount: "Decimal",
     currency: str,
-    manager,
-):
-    def _generate_payload():
-        payload = {
+    manager: "PluginsManager",
+) -> None:
+    def _generate_payload() -> Payload:
+        payload: Payload = {
             "order": get_default_order_payload(order),
             "recipient_email": order.get_customer_email(),
             "amount": quantize_price(amount, currency),
@@ -577,7 +607,7 @@ def send_order_refunded_confirmation(
 
 
 def attach_requester_payload_data(
-    payload: dict, user: Optional["User"], app: Optional["App"]
-):
+    payload: Payload, user: Optional["User"], app: Optional["App"]
+) -> None:
     payload["requester_user_id"] = to_global_id_or_none(user) if user else None
     payload["requester_app_id"] = to_global_id_or_none(app) if app else None
