@@ -47,8 +47,7 @@ task_logger = get_task_logger(__name__)
 PROMOTION_TOGGLE_BATCH_SIZE = 100
 
 
-# celery ships no type hints; the untyped-decorator error is reported only under --strict
-@app.task  # type: ignore[misc, unused-ignore]
+@app.task
 @allow_writer()
 def handle_promotion_toggle() -> None:
     """Send the notification about promotion toggle and recalculate discounted prices.
@@ -198,8 +197,7 @@ def fetch_promotion_variants_and_product_ids(
     return promotion_id_to_variants, list(products.values_list("id", flat=True))
 
 
-# celery ships no type hints; the untyped-decorator error is reported only under --strict
-@app.task  # type: ignore[misc, unused-ignore]
+@app.task
 @allow_writer()
 def clear_promotion_rule_variants_task() -> None:
     """Clear all promotion rule variants."""
@@ -223,8 +221,7 @@ def clear_promotion_rule_variants_task() -> None:
         clear_promotion_rule_variants_task.delay()
 
 
-# celery ships no type hints; the untyped-decorator error is reported only under --strict
-@app.task  # type: ignore[misc, unused-ignore]
+@app.task
 @allow_writer()
 def release_voucher_code_usage_of_draft_orders(
     voucher_codes_with_emails: list[tuple[str, str]],
@@ -273,8 +270,7 @@ def decrease_voucher_code_usage_of_draft_orders(channel_id: int) -> None:
     decrease_voucher_codes_usage_task.delay(list(voucher_code_ids), list(codes))
 
 
-# celery ships no type hints; the untyped-decorator error is reported only under --strict
-@app.task  # type: ignore[misc, unused-ignore]
+@app.task
 @allow_writer()
 def decrease_voucher_codes_usage_task(
     voucher_code_ids: list[int], codes: list[str]
@@ -312,8 +308,7 @@ def disconnect_voucher_codes_from_draft_orders(channel_id: int) -> None:
     disconnect_voucher_codes_from_draft_orders_task.delay(list(order_ids))
 
 
-# celery ships no type hints; the untyped-decorator error is reported only under --strict
-@app.task  # type: ignore[misc, unused-ignore]
+@app.task
 @allow_writer()
 def disconnect_voucher_codes_from_draft_orders_task(order_ids: list[UUID]) -> None:
     # Batch of size 1000 takes ~1sec and consumes ~20mb at peak
@@ -336,8 +331,7 @@ def disconnect_voucher_codes_from_draft_orders_task(order_ids: list[UUID]) -> No
             disconnect_voucher_codes_from_draft_orders_task.delay(remaining_ids)
 
 
-# celery ships no type hints; the untyped-decorator error is reported only under --strict
-@app.task(  # type: ignore[misc, unused-ignore]
+@app.task(
     name="saleor.discount.migrations.tasks.saleor3_17.update_discounted_prices_task"
 )
 @allow_writer()
@@ -374,8 +368,7 @@ def update_discounted_prices_task() -> None:
         update_discounted_prices_for_promotion(products)
 
 
-# celery ships no type hints; the untyped-decorator error is reported only under --strict
-@app.task(  # type: ignore[misc, unused-ignore]
+@app.task(
     name="saleor.discount.migrations.tasks.saleor3_17.set_promotion_rule_variants"
 )
 @allow_writer()
