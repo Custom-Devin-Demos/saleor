@@ -257,9 +257,9 @@ def get_discounted_lines[LineInfoT: "AnyLineInfo"](
     return discounted_lines
 
 
-def get_the_cheapest_line(
-    lines_info: Iterable["AnyLineInfo"] | None,
-) -> Optional["AnyLineInfo"]:
+def get_the_cheapest_line[LineInfoT: "AnyLineInfo"](
+    lines_info: Iterable[LineInfoT] | None,
+) -> LineInfoT | None:
     if not lines_info:
         return None
     return min(lines_info, key=lambda line_info: line_info.variant_discounted_price)

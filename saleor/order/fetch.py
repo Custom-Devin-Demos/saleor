@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Optional, cast
+from typing import Optional
 from uuid import UUID
 
 from django.db.models import prefetch_related_objects
@@ -208,7 +208,7 @@ def attach_voucher_info(lines_info: list[EditableOrderLineInfo], order: Order) -
 
 def reattach_apply_once_per_order_voucher_info(
     lines_info: list[EditableOrderLineInfo],
-    initial_cheapest_line_info: LineInfo | None,
+    initial_cheapest_line_info: LineInfo[OrderLineDiscount] | None,
     order: Order,
 ) -> None:
     """Reattach apply once per order voucher info if the cheapest line has changed."""
@@ -287,7 +287,6 @@ def _attach_denormalized_voucher_to_line_info(
     # line than it originates from (it depends on the actual cheapest line)
     if denormalized_voucher_info.apply_once_per_order is True:
         if cheapest_line_info := get_the_cheapest_line(lines_info):
-            cheapest_line_info = cast(EditableOrderLineInfo, cheapest_line_info)
             cheapest_line_info.voucher_denormalized_info = denormalized_voucher_info
             cheapest_line_info.voucher_code = voucher_code
         return
