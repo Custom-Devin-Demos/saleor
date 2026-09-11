@@ -113,6 +113,7 @@ class Address(ModelWithMetadata):
 
     __hash__ = models.Model.__hash__
 
+    # model_to_dict yields mixed field values (str, Country, ...)
     def as_data(self) -> dict[str, Any]:
         """Return the address as a dict suitable for passing as kwargs.
 
