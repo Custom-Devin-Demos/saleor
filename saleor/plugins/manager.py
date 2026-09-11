@@ -1151,7 +1151,7 @@ class PluginsManager(PaymentInterface):
 
     # Note: this method is deprecated and will be removed in a future release.
     # Webhook-related functionality will be moved from plugin to core modules.
-    def invoice_sent(self, invoice: "Invoice", email: str):
+    def invoice_sent(self, invoice: "Invoice", email: str | None):
         default_value = None
         channel_slug = invoice.order.channel.slug if invoice.order else None
         return self.__run_method_on_plugins(

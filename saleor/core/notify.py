@@ -11,11 +11,11 @@ class NotifyHandler:
 
     generate_payload_func: Callable[[], dict]
 
-    def __init__(self, payload_func):
+    def __init__(self, payload_func: Callable[[], dict]) -> None:
         self.generate_payload_func = payload_func
 
     @cache  # noqa: B019
-    def payload(self):
+    def payload(self) -> dict:
         return self.generate_payload_func()
 
 

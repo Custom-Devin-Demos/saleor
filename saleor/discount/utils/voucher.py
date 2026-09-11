@@ -482,8 +482,8 @@ def create_or_update_discount_object_from_order_level_voucher(
 
 
 def create_or_update_line_discount_objects_from_voucher(
-    lines_info, use_denormalized_data=False
-):
+    lines_info: list["EditableOrderLineInfo"], use_denormalized_data: bool = False
+) -> None:
     """Create or update line discount object for voucher applied on lines.
 
     The LineDiscount object is created for each line with voucher applied.

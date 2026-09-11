@@ -1,7 +1,9 @@
+from django.db.models import QuerySet
+
 from .models import CustomerType, User
 
 
-def user_qs_select_for_update():
+def user_qs_select_for_update() -> QuerySet[User]:
     return User.objects.order_by("pk").select_for_update(of=("self",))
 
 

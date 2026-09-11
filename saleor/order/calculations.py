@@ -107,7 +107,7 @@ def process_order_promotion(
     order: Order,
     lines_info: list[EditableOrderLineInfo],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     with allow_writer_for_default_connection(database_connection_name):
         # order promotion is qualified based on the most actual prices, therefor need to be assessed
         # on the every recalculation
@@ -121,7 +121,7 @@ def process_order_prices(
     lines: list[OrderLine],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ) -> Promise[tuple[Order, Iterable[OrderLine]]]:
-    def process_calculation_result(_):
+    def process_calculation_result(_: None) -> tuple[Order, Iterable[OrderLine]]:
         order.should_refresh_prices = False
         with allow_writer():
             with transaction.atomic(savepoint=False):
@@ -263,7 +263,7 @@ def promise_calculate_taxes_with_error_handling(
     requestor: Union["App", "User", None],
     database_connection_name: str,
 ) -> Promise[None]:
-    def process_error(e: Exception):
+    def process_error(e: Exception) -> None:
         if not isinstance(e, TaxDataError):
             raise e
         if str(e) != TaxDataErrorMessage.EMPTY:
@@ -301,7 +301,7 @@ def calculate_taxes(
 
     order.tax_error = None
 
-    def remove_tax_if_needed(_):
+    def remove_tax_if_needed(_: object) -> None:
         if should_charge_tax:
             return
         # If charge_taxes is disabled or order is exempt from taxes, remove the
@@ -347,7 +347,7 @@ def _calculate_and_add_tax(
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ) -> Promise[None]:
     @allow_writer_for_default_connection(database_connection_name)
-    def process_flat_taxes(_):
+    def process_flat_taxes(_: None) -> None:
         # Get taxes calculated with flat rates and apply to order.
         update_order_prices_with_flat_rates(
             order,
@@ -370,7 +370,7 @@ def _calculate_and_add_tax(
         )
 
     # Deprecated flow when no tax app identifier is provided.
-    def recalculate_with_tax_app_data(tax_data: TaxData | None):
+    def recalculate_with_tax_app_data(tax_data: TaxData | None) -> None:
         _apply_tax_data(order, lines, tax_data, prices_entered_with_tax)
 
     _recalculate_with_plugins(manager, order, lines, prices_entered_with_tax)
@@ -394,7 +394,7 @@ def _call_plugin_or_tax_app(
     prices_entered_with_tax: bool,
     requestor: Union["App", "User", None],
 ) -> Promise[None]:
-    def recalculate_with_plugins(_):
+    def recalculate_with_plugins(_: None) -> Promise[None]:
         plugin_ids = [tax_app_identifier.replace(PLUGIN_IDENTIFIER_PREFIX, "")]
         plugins = manager.get_plugins(
             order.channel.slug, active_only=True, plugin_ids=plugin_ids
@@ -412,11 +412,13 @@ def _call_plugin_or_tax_app(
             return Promise.reject(TaxDataError(order.tax_error))
         return Promise.resolve(None)
 
-    def recalculate_with_tax_app_data(tax_data: TaxData | None):
+    def recalculate_with_tax_app_data(tax_data: TaxData | None) -> None:
         _apply_tax_data(order, lines, tax_data, prices_entered_with_tax)
 
     if tax_app_identifier.startswith(PLUGIN_IDENTIFIER_PREFIX):
-        return Promise.resolve(None).then(recalculate_with_plugins)
+        # `promise` stubs type `then` as `Callable[[T], S] -> Promise[S]` and do
+        # not model flattening of a returned Promise (a genuine stub limitation).
+        return Promise.resolve(None).then(recalculate_with_plugins)  # type: ignore[arg-type]
 
     return _get_promised_taxes_for_order(
         order, lines, tax_app_identifier, requestor=requestor
@@ -437,7 +439,7 @@ def _get_promised_taxes_for_order(
     """
     from .webhooks import order_calculate_taxes
 
-    def process_error(e: Exception):
+    def process_error(e: Exception) -> Promise[TaxData | None]:
         if isinstance(e, TaxDataError):
             log_address_if_validation_skipped_for_order(order, logger)
         return Promise.reject(e)
@@ -534,8 +536,8 @@ def _recalculate_with_plugins(
 def _get_undiscounted_price(
     line_price: OrderTaxedPricesData,
     undiscounted_base_price: Money,
-    tax_rate,
-    prices_entered_with_tax,
+    tax_rate: Decimal,
+    prices_entered_with_tax: bool,
 ) -> TaxedMoney:
     if (
         tax_rate > 0
@@ -612,14 +614,16 @@ def _apply_tax_data(
     order.undiscounted_total = undiscounted_shipping_price + undiscounted_subtotal
 
 
-def remove_tax(order, lines, prices_entered_with_taxes):
+def remove_tax(
+    order: Order, lines: Iterable[OrderLine], prices_entered_with_taxes: bool
+) -> None:
     if prices_entered_with_taxes:
         _remove_tax_net(order, lines)
     else:
         _remove_tax_gross(order, lines)
 
 
-def _remove_tax_gross(order, lines):
+def _remove_tax_gross(order: Order, lines: Iterable[OrderLine]) -> None:
     """Set gross values equal to net values."""
     order.total_gross_amount = order.total_net_amount
     order.undiscounted_total_gross_amount = order.undiscounted_total_net_amount
@@ -639,7 +643,7 @@ def _remove_tax_gross(order, lines):
         line.tax_rate = Decimal("0.00")
 
 
-def _remove_tax_net(order, lines):
+def _remove_tax_net(order: Order, lines: Iterable[OrderLine]) -> None:
     """Set net values equal to gross values."""
     order.total_net_amount = order.total_gross_amount
     order.undiscounted_total_net_amount = order.undiscounted_total_gross_amount
@@ -746,7 +750,7 @@ def refresh_order_base_prices_and_discounts(
     return lines_info
 
 
-def _set_channel_listing_prices(lines_info: list[EditableOrderLineInfo]):
+def _set_channel_listing_prices(lines_info: list[EditableOrderLineInfo]) -> None:
     for line_info in lines_info:
         line = line_info.line
         channel_listing = line_info.channel_listing
@@ -755,13 +759,13 @@ def _set_channel_listing_prices(lines_info: list[EditableOrderLineInfo]):
             line.base_unit_price_amount = channel_listing.price_amount
 
 
-def _clear_prefetched_order_line_discounts(lines):
+def _clear_prefetched_order_line_discounts(lines: Iterable[OrderLine]) -> None:
     for line in lines:
         if hasattr(line, "_prefetched_objects_cache"):
             line._prefetched_objects_cache.pop("discounts", None)
 
 
-def refresh_all_order_base_prices_and_discounts(order):
+def refresh_all_order_base_prices_and_discounts(order: Order) -> None:
     lines = order.lines.all()
     line_ids_to_refresh = [line.id for line in lines]
     refresh_order_base_prices_and_discounts(order, line_ids_to_refresh, lines)
@@ -785,7 +789,9 @@ def order_line_unit(
     """
     currency = order.currency
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(
+        result: tuple[Order, Iterable[OrderLine]],
+    ) -> OrderTaxedPricesData:
         _, lines = result
         line = _find_order_line(lines, order_line)
         return OrderTaxedPricesData(
@@ -822,7 +828,9 @@ def order_line_total(
     """
     currency = order.currency
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(
+        result: tuple[Order, Iterable[OrderLine]],
+    ) -> OrderTaxedPricesData:
         _, lines = result
         line = _find_order_line(lines, order_line)
         return OrderTaxedPricesData(
@@ -858,7 +866,7 @@ def order_line_tax_rate(
     and save them in the model directly.
     """
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> Decimal | None:
         _, lines = result
         line = _find_order_line(lines, order_line)
         return line.tax_rate
@@ -882,7 +890,7 @@ def order_line_unit_discount(
     lines: Iterable[OrderLine] | None = None,
     force_update: bool = False,
     allow_sync_webhooks: bool = True,
-) -> Promise[Decimal]:
+) -> Promise[Money]:
     """Return the line unit discount.
 
     It takes into account all plugins.
@@ -895,7 +903,7 @@ def order_line_unit_discount(
     - manual line discounts
     """
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> Money:
         _, lines = result
         line = _find_order_line(lines, order_line)
         return line.unit_discount
@@ -926,7 +934,7 @@ def order_line_unit_discount_value(
     and save them in the model directly.
     """
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> Decimal:
         _, lines = result
         line = _find_order_line(lines, order_line)
         return line.unit_discount_value
@@ -957,7 +965,7 @@ def order_line_unit_discount_type(
     and save them in the model directly.
     """
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> str | None:
         _, lines = result
         line = _find_order_line(lines, order_line)
         return line.unit_discount_type
@@ -989,7 +997,7 @@ def order_undiscounted_shipping(
     """
     currency = order.currency
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> TaxedMoney:
         order, _ = result
         return quantize_price(order.undiscounted_base_shipping_price, currency)
 
@@ -1021,7 +1029,7 @@ def order_shipping(
     """
     currency = order.currency
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> TaxedMoney:
         order, _ = result
         return quantize_price(order.shipping_price, currency)
 
@@ -1052,7 +1060,7 @@ def order_shipping_tax_rate(
     and save them in the model directly.
     """
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> Decimal | None:
         order, _ = result
         return order.shipping_tax_rate
 
@@ -1084,7 +1092,7 @@ def order_subtotal(
     """
     currency = order.currency
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> TaxedMoney:
         order, _ = result
         return quantize_price(order.subtotal, currency)
 
@@ -1116,7 +1124,7 @@ def order_total(
     """
     currency = order.currency
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> TaxedMoney:
         order, _ = result
         return quantize_price(order.total, currency)
 
@@ -1148,7 +1156,7 @@ def order_undiscounted_total(
     """
     currency = order.currency
 
-    def process_result(result: tuple[Order, Iterable[OrderLine]]):
+    def process_result(result: tuple[Order, Iterable[OrderLine]]) -> TaxedMoney:
         order, _ = result
         return quantize_price(order.undiscounted_total, currency)
 

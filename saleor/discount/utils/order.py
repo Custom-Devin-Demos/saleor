@@ -393,7 +393,9 @@ def _update_base_unit_price_amount_for_catalogue_promotion(
         line.base_unit_price_amount = max(base_unit_price, Decimal(0))
 
 
-def refresh_manual_line_discount_object(lines_info):
+def refresh_manual_line_discount_object(
+    lines_info: Iterable["EditableOrderLineInfo"],
+) -> None:
     discount_to_update: list[OrderLineDiscount] = []
     for line_info in lines_info:
         manual_discount = line_info.get_manual_line_discount()

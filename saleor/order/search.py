@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from .models import Order
 
 
-def update_order_search_vector(order: "Order", *, save: bool = True):
+def update_order_search_vector(order: "Order", *, save: bool = True) -> None:
     order.search_vector = FlatConcatSearchVector(
         *prepare_order_search_vector_value(order)
     )
@@ -21,7 +21,7 @@ def update_order_search_vector(order: "Order", *, save: bool = True):
 
 
 def prepare_order_search_vector_value(
-    order: "Order", *, already_prefetched=False
+    order: "Order", *, already_prefetched: bool = False
 ) -> list[NoValidationSearchVector]:
     if not already_prefetched:
         prefetch_related_objects(

@@ -1,6 +1,9 @@
 import datetime
 import logging
 from collections import Counter
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 from django.conf import settings
 from django.contrib.sites.models import Site
@@ -16,7 +19,7 @@ from ..core.db.connection import allow_writer
 from ..core.tracing import traced_atomic_transaction
 from ..discount.models import Voucher, VoucherCode, VoucherCustomer
 from ..payment.models import Payment, TransactionItem
-from ..plugins.manager import get_plugins_manager
+from ..plugins.manager import PluginsManager, get_plugins_manager
 from ..warehouse.management import deallocate_stock_for_orders
 from ..webhook.event_types import WebhookEventAsyncType, WebhookEventSyncType
 from ..webhook.utils import get_webhooks_for_multiple_events
@@ -24,6 +27,9 @@ from . import OrderEvents, OrderStatus
 from .actions import call_order_event, call_order_events
 from .models import Order, OrderEvent
 from .utils import invalidate_order_prices
+
+if TYPE_CHECKING:
+    from ..site.models import SiteSettings
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +43,7 @@ DELETE_EXPIRED_ORDER_BATCH_SIZE = 5000
 
 @app.task
 @allow_writer()
-def recalculate_orders_task(order_ids: list[int]):
+def recalculate_orders_task(order_ids: list[int]) -> None:
     orders = Order.objects.filter(id__in=order_ids)
 
     for order in orders:
@@ -48,7 +54,7 @@ def recalculate_orders_task(order_ids: list[int]):
 
 @app.task
 @allow_writer()
-def send_order_updated(order_ids):
+def send_order_updated(order_ids: Iterable[UUID]) -> None:
     manager = get_plugins_manager(allow_replica=True)
     webhook_event_map = get_webhooks_for_multiple_events(
         [
@@ -65,7 +71,7 @@ def send_order_updated(order_ids):
         )
 
 
-def _bulk_release_voucher_usage(order_ids):
+def _bulk_release_voucher_usage(order_ids: list[UUID]) -> None:
     voucher_orders = Order.objects.filter(
         voucher_code=OuterRef("code"),
         id__in=order_ids,
@@ -103,7 +109,7 @@ def _bulk_release_voucher_usage(order_ids):
     ).delete()
 
 
-def _call_expired_order_events(order_ids, manager):
+def _call_expired_order_events(order_ids: list[UUID], manager: PluginsManager) -> None:
     orders = (
         Order.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME)
         .filter(id__in=order_ids)
@@ -128,7 +134,7 @@ def _call_expired_order_events(order_ids, manager):
         )
 
 
-def _order_expired_events(order_ids):
+def _order_expired_events(order_ids: list[UUID]) -> None:
     OrderEvent.objects.bulk_create(
         [
             OrderEvent(
@@ -141,11 +147,14 @@ def _order_expired_events(order_ids):
 
 
 @allow_writer()
-def _expire_orders(manager, now, site_settings):
+def _expire_orders(
+    manager: PluginsManager, now: datetime.datetime, site_settings: "SiteSettings"
+) -> None:
+    time_diff = Value(now) - OuterRef("created_at")
     time_diff_func_in_minutes = (
-        Func(Value("day"), now - OuterRef("created_at"), function="DATE_PART") * 24
-        + Func(Value("hour"), now - OuterRef("created_at"), function="DATE_PART") * 60
-    ) + Func(Value("minute"), now - OuterRef("created_at"), function="DATE_PART")
+        Func(Value("day"), time_diff, function="DATE_PART") * 24
+        + Func(Value("hour"), time_diff, function="DATE_PART") * 60
+    ) + Func(Value("minute"), time_diff, function="DATE_PART")
     channels = Channel.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME).filter(
         id=OuterRef("channel"),
         expire_orders_after__isnull=False,
@@ -172,7 +181,7 @@ def _expire_orders(manager, now, site_settings):
 
 
 @app.task
-def expire_orders_task():
+def expire_orders_task() -> None:
     now = timezone.now()
     manager = get_plugins_manager(allow_replica=True)
     site_settings = Site.objects.get_current().settings
@@ -180,7 +189,7 @@ def expire_orders_task():
 
 
 @app.task
-def delete_expired_orders_task():
+def delete_expired_orders_task() -> None:
     now = timezone.now()
 
     channel_qs = Channel.objects.using(
@@ -227,7 +236,7 @@ def delete_expired_orders_task():
 
 
 @allow_writer()
-def reduce_user_number_of_orders(user_orders_count: dict[int, int]):
+def reduce_user_number_of_orders(user_orders_count: dict[int, int]) -> None:
     user_ids = list(user_orders_count.keys())
     users_to_update = []
     with traced_atomic_transaction():

@@ -6,7 +6,7 @@ from ..utils import build_absolute_uri, get_domain
 LOGO_URL = "images/saleor-logo-sign.png"
 
 
-def get_site_context():
+def get_site_context() -> dict[str, str]:
     site: Site = Site.objects.get_current()
     site_context = {
         "domain": get_domain(),
