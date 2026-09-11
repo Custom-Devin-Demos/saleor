@@ -15,9 +15,7 @@ def get_last_payment(payments: Iterable[Payment]) -> Payment | None:
     return max(payments, default=None, key=attrgetter("pk"))
 
 
-def get_total_authorized(
-    payments: Iterable[Payment], fallback_currency: str
-) -> Money:
+def get_total_authorized(payments: Iterable[Payment], fallback_currency: str) -> Money:
     # FIXME adjust to multiple payments in the future
     if last_payment := get_last_payment(payments):
         if last_payment.is_active:

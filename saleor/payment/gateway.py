@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Callable
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Optional, ParamSpec, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
 from ..account.models import User
 from ..app.models import App
@@ -52,18 +52,12 @@ logger = logging.getLogger(__name__)
 ERROR_MSG = "Oops! Something went wrong."
 GENERIC_TRANSACTION_ERROR = "Transaction was unsuccessful."
 
-P = ParamSpec("P")
-R = TypeVar("R")
-R_co = TypeVar("R_co", covariant=True)
+
+class PaymentCallable[**P, R_co](Protocol):
+    def __call__(self, payment: Payment, *args: P.args, **kwargs: P.kwargs) -> R_co: ...
 
 
-class PaymentCallable(Protocol[P, R_co]):
-    def __call__(
-        self, payment: Payment, *args: P.args, **kwargs: P.kwargs
-    ) -> R_co: ...
-
-
-def raise_payment_error(
+def raise_payment_error[**P](
     fn: Callable[P, Transaction],
 ) -> Callable[P, Transaction]:
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> Transaction:
@@ -75,7 +69,7 @@ def raise_payment_error(
     return wrapped
 
 
-def payment_postprocess(
+def payment_postprocess[**P](
     fn: Callable[P, Transaction],
 ) -> Callable[P, Transaction]:
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> Transaction:
@@ -86,7 +80,9 @@ def payment_postprocess(
     return wrapped
 
 
-def require_active_payment(fn: PaymentCallable[P, R]) -> PaymentCallable[P, R]:
+def require_active_payment[**P, R](
+    fn: PaymentCallable[P, R],
+) -> PaymentCallable[P, R]:
     def wrapped(payment: Payment, *args: P.args, **kwargs: P.kwargs) -> R:
         if not payment.is_active:
             raise PaymentError("This payment is no longer active.")
@@ -95,7 +91,9 @@ def require_active_payment(fn: PaymentCallable[P, R]) -> PaymentCallable[P, R]:
     return wrapped
 
 
-def with_locked_payment(fn: PaymentCallable[P, R]) -> PaymentCallable[P, R]:
+def with_locked_payment[**P, R](
+    fn: PaymentCallable[P, R],
+) -> PaymentCallable[P, R]:
     """Lock payment to protect from asynchronous modification."""
 
     def wrapped(payment: Payment, *args: P.args, **kwargs: P.kwargs) -> R:
@@ -527,7 +525,7 @@ def list_gateways(
     return get_payment_gateways(manager=manager, channel_slug=channel_slug)
 
 
-def _fetch_gateway_response(
+def _fetch_gateway_response[**P](
     fn: Callable[P, GatewayResponse], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[GatewayResponse | None, str | None]:
     response: GatewayResponse | None = None
