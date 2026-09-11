@@ -47,7 +47,7 @@ def list_shipping_methods_for_checkout(
             )
         )
 
-    def process_responses(responses: list[Any]):
+    def process_responses(responses: list[Any]) -> list[ShippingMethodData]:
         for response_data, webhook in zip(responses, webhooks, strict=True):
             if response_data:
                 shipping_methods = _parse_list_shipping_methods_response(

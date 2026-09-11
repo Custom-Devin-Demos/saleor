@@ -19,7 +19,7 @@ def _update_charge_status(
     checkout_total_gross: Money,
     total_charged: Money,
     checkout_has_lines: bool,
-):
+) -> None:
     zero_money_amount = zero_money(checkout.currency)
     total_charged = max(zero_money_amount, total_charged)
     checkout_with_only_zero_price_lines = (
@@ -46,7 +46,7 @@ def _update_authorize_status(
     total_authorized: Money,
     total_charged: Money,
     checkout_has_lines: bool,
-):
+) -> None:
     total_covered = total_authorized + total_charged
     zero_money_amount = zero_money(checkout.currency)
 
@@ -87,7 +87,7 @@ def update_checkout_payment_statuses(
     checkout_transactions: Iterable["TransactionItem"] | None = None,
     save: bool = True,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     current_authorize_status = checkout.authorize_status
     current_charge_status = checkout.charge_status
 

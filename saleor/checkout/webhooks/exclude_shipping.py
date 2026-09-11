@@ -64,7 +64,7 @@ def excluded_shipping_methods_for_checkout(
 def _generate_excluded_shipping_methods_for_checkout_payload(
     checkout: "Checkout",
     available_shipping_methods: list[ShippingMethodData],
-):
+) -> str:
     checkout_data = json.loads(generate_checkout_payload(checkout))[0]
     payload = {
         "checkout": checkout_data,

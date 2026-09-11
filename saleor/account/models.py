@@ -126,7 +126,7 @@ class Address(ModelWithMetadata):
             data["phone"] = data["phone"].as_e164
         return data
 
-    def get_copy(self):
+    def get_copy(self) -> "Address":
         """Return a new instance of the same address."""
         return Address.objects.create(**self.as_data())
 

@@ -6,6 +6,7 @@ taxes (Money instead of TaxedMoney). If you don't need pre-taxed prices use func
 from calculations.py.
 """
 
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from prices import Money
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from ..channel.models import Channel
     from .delivery_context import ShippingMethodInfo
     from .fetch import CheckoutInfo, CheckoutLineInfo
+    from .models import CheckoutLine
 
 
 def calculate_base_line_unit_price(
@@ -80,7 +82,7 @@ def calculate_undiscounted_base_line_total_price(
 def calculate_undiscounted_base_line_unit_price(
     line_info: "CheckoutLineInfo",
     channel: "Channel",
-):
+) -> Money:
     """Calculate line unit price without discounts and vouchers."""
     variant_price = line_info.undiscounted_unit_price
     return quantize_price(variant_price, variant_price.currency)
@@ -265,7 +267,7 @@ def _propagate_checkout_discount_on_checkout_lines_prices(
     lines: list["CheckoutLineInfo"],
     total_discount: Money,
     currency: str,
-):
+) -> Iterator[tuple["CheckoutLine", Money]]:
     """Apply checkout discount on checkout line price.
 
     Propagate the discount amount proportionally to total prices of items.

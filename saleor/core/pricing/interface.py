@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Generic, Optional, TypeVar, Union
 from ...discount import DiscountType
 
 if TYPE_CHECKING:
+    from prices import Money
+
     from ...channel.models import Channel
     from ...checkout.models import CheckoutLine
     from ...discount.models import CheckoutLineDiscount, OrderLineDiscount, Voucher
@@ -15,7 +17,6 @@ if TYPE_CHECKING:
         ProductType,
         ProductVariant,
     )
-
 
 LineDiscountT = TypeVar(
     "LineDiscountT",
@@ -37,7 +38,7 @@ class LineInfo(Generic[LineDiscountT]):
     voucher_code: str | None
 
     @property
-    def variant_discounted_price(self):
+    def variant_discounted_price(self) -> "Money":
         raise NotImplementedError
 
     def get_promotion_discounts(

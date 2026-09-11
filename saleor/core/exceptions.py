@@ -30,7 +30,7 @@ class UnsupportedMediaProviderException(Exception):
 
 
 class NonExistingCheckoutLines(Exception):
-    def __init__(self, line_pks: set[UUID]):
+    def __init__(self, line_pks: set[str]):
         self.line_pks = line_pks
         super().__init__("Checkout lines don't exist.")
 

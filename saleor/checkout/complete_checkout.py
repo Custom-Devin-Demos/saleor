@@ -89,6 +89,7 @@ from .fetch import (
 )
 from .models import Checkout
 from .utils import (
+    MetadataItemLike,
     calculate_checkout_weight,
     delete_checkouts,
     get_checkout_metadata,
@@ -107,7 +108,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _process_voucher_data_for_order(checkout_info: "CheckoutInfo") -> dict:
+def _process_voucher_data_for_order(
+    checkout_info: "CheckoutInfo",
+) -> dict[str, Any]:  # heterogeneous Order constructor kwargs
     """Fetch, process and return voucher/discount data from checkout.
 
     Careful! It should be called inside a transaction.
@@ -140,7 +143,7 @@ def _increase_checkout_voucher_usage(
     voucher_code: "VoucherCode",
     voucher: "Voucher",
     customer_email: str,
-):
+) -> None:
     # Prevent race condition when two different threads are processing the same checkout
     # with limited usage voucher assigned, both threads increasing the
     # voucher usage which causing `NotApplicable` error for voucher.
@@ -159,7 +162,7 @@ def _release_checkout_voucher_usage(
     voucher: Optional["Voucher"],
     user_email: str | None,
     checkout_update_fields: list[str] | None = None,
-):
+) -> None:
     if not checkout.is_voucher_usage_increased:
         return
 
@@ -269,7 +272,9 @@ def _should_store_shipping_address_in_user_addresses(
     return bool(save_shipping_address and checkout_info.user and shipping_address)
 
 
-def _process_user_data_for_order(checkout_info: "CheckoutInfo", manager):
+def _process_user_data_for_order(
+    checkout_info: "CheckoutInfo", manager: "PluginsManager"
+) -> dict[str, Any]:  # heterogeneous Order constructor kwargs
     """Fetch, process and return shipping data from checkout."""
     billing_address = checkout_info.billing_address
     save_billing_address = checkout_info.checkout.save_billing_address
@@ -560,7 +565,7 @@ def _create_order_line_discounts(
     return line_discounts
 
 
-def _get_sale_id(line_discounts: list[OrderLineDiscount]):
+def _get_sale_id(line_discounts: list[OrderLineDiscount]) -> str | None:
     for discount in line_discounts:
         if discount.type == DiscountType.PROMOTION:
             if rule := discount.promotion_rule:
@@ -661,13 +666,13 @@ def _prepare_order_data(
     lines: list["CheckoutLineInfo"],
     prices_entered_with_tax: bool,
     site_settings: "SiteSettings",
-) -> dict:
+) -> dict[str, Any]:  # heterogeneous Order constructor kwargs
     """Run checks and return all the data from a given checkout to create an order.
 
     :raises NotApplicable InsufficientStock:
     """
     checkout = checkout_info.checkout
-    order_data = {}
+    order_data: dict[str, Any] = {}  # heterogeneous Order constructor kwargs
     taxed_total = calculations.calculate_checkout_total_with_gift_cards(
         manager=manager,
         checkout_info=checkout_info,
@@ -767,13 +772,13 @@ def _create_order(
     *,
     checkout_info: "CheckoutInfo",
     checkout_lines: list["CheckoutLineInfo"],
-    order_data: dict,
-    user: User,
+    order_data: dict[str, Any],  # heterogeneous Order constructor kwargs
+    user: User | None,
     app: Optional["App"],
     manager: "PluginsManager",
     site_settings: Optional["SiteSettings"] = None,
-    metadata_list: list | None = None,
-    private_metadata_list: list | None = None,
+    metadata_list: list[MetadataItemLike] | None = None,
+    private_metadata_list: list[MetadataItemLike] | None = None,
     is_automatic_completion: bool = False,
 ) -> Order:
     """Create an order from the checkout.
@@ -913,8 +918,8 @@ def _create_order(
 def _prepare_checkout(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-    redirect_url,
-):
+    redirect_url: str | None,
+) -> None:
     """Prepare checkout object to complete the checkout process."""
     checkout = checkout_info.checkout
     clean_checkout_shipping(checkout_info, lines, CheckoutErrorCode)
@@ -950,7 +955,7 @@ def _prepare_checkout_with_transactions(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
     redirect_url: str | None,
-):
+) -> None:
     """Prepare checkout object with transactions to complete the checkout process."""
     clean_billing_address(checkout_info, CheckoutErrorCode)
     if (
@@ -995,7 +1000,7 @@ def _prepare_checkout_with_payment(
     lines: list["CheckoutLineInfo"],
     redirect_url: str | None,
     payment: Payment | None,
-):
+) -> None:
     """Prepare checkout object with payment to complete the checkout process."""
     clean_checkout_payment(
         manager,
@@ -1016,7 +1021,7 @@ def _get_order_data(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
     site_settings: "SiteSettings",
-) -> dict:
+) -> dict[str, Any]:  # heterogeneous Order constructor kwargs
     """Prepare data that will be converted to order and its lines."""
     tax_configuration = checkout_info.tax_configuration
     prices_entered_with_tax = tax_configuration.prices_entered_with_tax
@@ -1051,7 +1056,7 @@ def _process_payment(
     payment: Payment,
     customer_id: str | None,
     store_source: bool,
-    payment_data: dict | None,
+    payment_data: dict[str, Any] | None,  # gateway-specific JSON payload
     manager: "PluginsManager",
     channel_slug: str,
     voucher_code: Optional["VoucherCode"] = None,
@@ -1059,6 +1064,7 @@ def _process_payment(
 ) -> Transaction:
     """Process the payment assigned to checkout."""
     try:
+        txn: Transaction
         if payment.to_confirm:
             txn = gateway.confirm(
                 payment,
@@ -1092,9 +1098,9 @@ def complete_checkout_pre_payment_part(
     lines: list["CheckoutLineInfo"],
     user: Optional["User"],
     app: Optional["App"],
-    site_settings=None,
-    redirect_url=None,
-) -> tuple[Payment | None, str | None, dict]:
+    site_settings: Optional["SiteSettings"] = None,
+    redirect_url: str | None = None,
+) -> tuple[Payment | None, str | None, dict[str, Any]]:
     """Logic required to process checkout before payment.
 
     Should be used with transaction_with_commit_on_errors, as there is a possibility
@@ -1116,11 +1122,6 @@ def complete_checkout_pre_payment_part(
             redirect_url=redirect_url,
             payment=payment,
         )
-    except Checkout.DoesNotExist:
-        order = Order.objects.get_by_checkout_token(checkout_info.checkout.token)
-        # TODO(mypy-strict): `get_by_checkout_token` may return None and this
-        # function declares a tuple return; pre-existing behavior kept as-is.
-        return order  # type: ignore[return-value]
     except ValidationError as exc:
         _complete_checkout_fail_handler(checkout_info, manager, payment=payment)
         raise exc
@@ -1144,14 +1145,14 @@ def complete_checkout_post_payment_part(
     lines: list["CheckoutLineInfo"],
     payment: Payment | None,
     txn: Transaction | None,
-    order_data,
-    user,
-    app,
-    site_settings=None,
-    metadata_list: list | None = None,
-    private_metadata_list: list | None = None,
+    order_data: dict[str, Any],  # heterogeneous Order constructor kwargs
+    user: Optional["User"],
+    app: Optional["App"],
+    site_settings: Optional["SiteSettings"] = None,
+    metadata_list: list[MetadataItemLike] | None = None,
+    private_metadata_list: list[MetadataItemLike] | None = None,
     is_automatic_completion: bool = False,
-) -> tuple[Order | None, bool, dict]:
+) -> tuple[Order | None, bool, dict[str, str]]:
     action_required = False
     action_data: dict[str, str] = {}
 
@@ -1211,7 +1212,7 @@ def complete_checkout_post_payment_part(
     return order, action_required, action_data
 
 
-def _is_refund_ongoing(payment):
+def _is_refund_ongoing(payment: Payment | None) -> bool:
     """Return True if refund is ongoing for given payment."""
     return (
         payment.transactions.filter(
@@ -1222,7 +1223,9 @@ def _is_refund_ongoing(payment):
     )
 
 
-def _increase_voucher_code_usage_value(checkout_info: "CheckoutInfo"):
+def _increase_voucher_code_usage_value(
+    checkout_info: "CheckoutInfo",
+) -> Optional["VoucherCode"]:
     """Increase a voucher usage applied to the checkout."""
     voucher, code = get_voucher_for_checkout_info(checkout_info, with_lock=True)
     if not voucher or not code:
@@ -1273,7 +1276,7 @@ def _handle_allocations_of_order_lines(
     requestor: "App | User | None",
     reservation_enabled: bool,
     calculate_stocks_with_shipping_zones: bool,
-):
+) -> None:
     country_code = checkout_info.get_country()
     additional_warehouse_lookup = (
         checkout_info.get_delivery_method_info().get_warehouse_filter_lookup()
@@ -1298,7 +1301,7 @@ def _handle_allocations_of_order_lines(
     )
 
 
-def _create_order_discount(order: "Order", checkout_info: "CheckoutInfo"):
+def _create_order_discount(order: "Order", checkout_info: "CheckoutInfo") -> None:
     checkout = checkout_info.checkout
     checkout_discount = checkout.discounts.first()
 
@@ -1349,7 +1352,7 @@ def _post_create_order_actions(
     app: Optional["App"],
     site_settings: "SiteSettings",
     is_automatic_completion: bool,
-):
+) -> None:
     order_info = OrderInfo(
         order=order,
         customer_email=order.user_email,
@@ -1383,11 +1386,11 @@ def _create_order_from_checkout(
     manager: "PluginsManager",
     user: User | None,
     app: Optional["App"],
-    metadata_list: list | None = None,
-    private_metadata_list: list | None = None,
+    metadata_list: list[MetadataItemLike] | None = None,
+    private_metadata_list: list[MetadataItemLike] | None = None,
     is_automatic_completion: bool = False,
     force_update: bool = False,
-):
+) -> Order:
     from ..order.utils import add_gift_cards_to_order
 
     site_settings = Site.objects.get_current().settings
@@ -1567,10 +1570,10 @@ def create_order_from_checkout(
     user: Optional["User"],
     app: Optional["App"],
     delete_checkout: bool = True,
-    metadata_list: list | None = None,
-    private_metadata_list: list | None = None,
+    metadata_list: list[MetadataItemLike] | None = None,
+    private_metadata_list: list[MetadataItemLike] | None = None,
     is_automatic_completion: bool = False,
-) -> Order:
+) -> Order | None:
     """Crate order from checkout.
 
     If checkout doesn't have all required data, the function will raise ValidationError.
@@ -1599,16 +1602,14 @@ def create_order_from_checkout(
             )
             if not checkout:
                 order = Order.objects.get_by_checkout_token(checkout_pk)
-                # TODO(mypy-strict): may be None; pre-existing behavior kept as-is.
-                return order  # type: ignore[return-value]
+                return order
             code = _increase_voucher_code_usage_value(checkout_info=checkout_info)
 
     with transaction.atomic():
         checkout = Checkout.objects.select_for_update().filter(pk=checkout_pk).first()
         if not checkout:
             order = Order.objects.get_by_checkout_token(checkout_pk)
-            # TODO(mypy-strict): may be None; pre-existing behavior kept as-is.
-            return order  # type: ignore[return-value]
+            return order
 
         # Fetching checkout info inside the transaction block with select_for_update
         # ensure that we are processing checkout on the current data.
@@ -1691,7 +1692,7 @@ def create_order_from_checkout(
 def assign_checkout_user(
     user: Optional["User"],
     checkout_info: "CheckoutInfo",
-):
+) -> None:
     # Assign checkout user to an existing user if checkout email matches a valid
     #  customer account
     if user is None and not checkout_info.user and checkout_info.checkout.email:
@@ -1705,16 +1706,16 @@ def complete_checkout(
     manager: "PluginsManager",
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-    payment_data: dict[Any, Any],
+    payment_data: dict[str, Any],  # gateway-specific JSON payload
     store_source: bool,
     user: Optional["User"],
     app: Optional["App"],
     site_settings: Optional["SiteSettings"] = None,
     redirect_url: str | None = None,
-    metadata_list: list | None = None,
-    private_metadata_list: list | None = None,
+    metadata_list: list[MetadataItemLike] | None = None,
+    private_metadata_list: list[MetadataItemLike] | None = None,
     is_automatic_completion: bool = False,
-) -> tuple[Order | None, bool, dict]:
+) -> tuple[Order | None, bool, dict[str, str]]:
     checkout = checkout_info.checkout
     transactions = checkout_info.checkout.payment_transactions.all()
 
@@ -1784,8 +1785,8 @@ def complete_checkout_with_transaction(
     user: Optional["User"],
     app: Optional["App"],
     redirect_url: str | None = None,
-    metadata_list: list | None = None,
-    private_metadata_list: list | None = None,
+    metadata_list: list[MetadataItemLike] | None = None,
+    private_metadata_list: list[MetadataItemLike] | None = None,
     is_automatic_completion: bool = False,
 ) -> Order | None:
     try:
@@ -1828,16 +1829,16 @@ def complete_checkout_with_transaction(
 def complete_checkout_with_payment(
     manager: "PluginsManager",
     checkout_pk: UUID,
-    payment_data,
-    store_source,
-    user,
-    app,
-    site_settings=None,
-    redirect_url=None,
-    metadata_list: list | None = None,
-    private_metadata_list: list | None = None,
+    payment_data: dict[str, Any],  # gateway-specific JSON payload
+    store_source: bool,
+    user: Optional["User"],
+    app: Optional["App"],
+    site_settings: Optional["SiteSettings"] = None,
+    redirect_url: str | None = None,
+    metadata_list: list[MetadataItemLike] | None = None,
+    private_metadata_list: list[MetadataItemLike] | None = None,
     is_automatic_completion: bool = False,
-) -> tuple[Order | None, bool, dict]:
+) -> tuple[Order | None, bool, dict[str, str]]:
     """Logic required to finalize the checkout and convert it to order.
 
     Should be used with transaction_with_commit_on_errors, as there is a possibility
@@ -1860,15 +1861,19 @@ def complete_checkout_with_payment(
         assign_checkout_user(user, checkout_info)
 
         site_settings = site_settings or Site.objects.get_current().settings
-        payment, customer_id, order_data = complete_checkout_pre_payment_part(
-            manager=manager,
-            checkout_info=checkout_info,
-            lines=lines,
-            user=user,
-            app=app,
-            site_settings=site_settings,
-            redirect_url=redirect_url,
-        )
+        try:
+            payment, customer_id, order_data = complete_checkout_pre_payment_part(
+                manager=manager,
+                checkout_info=checkout_info,
+                lines=lines,
+                user=user,
+                app=app,
+                site_settings=site_settings,
+                redirect_url=redirect_url,
+            )
+        except Checkout.DoesNotExist:
+            order = Order.objects.get_by_checkout_token(checkout_pk)
+            return order, False, {}
 
         _reserve_stocks_without_availability_check(
             checkout_info,
@@ -1967,7 +1972,7 @@ def _reserve_stocks_without_availability_check(
     checkout_info: CheckoutInfo,
     lines: list[CheckoutLineInfo],
     calculate_stocks_with_shipping_zones: bool,
-):
+) -> list[Reservation]:
     """Add additional temporary reservation for stock.
 
     Due to unlocking rows, for the time of external payment call, it prevents users

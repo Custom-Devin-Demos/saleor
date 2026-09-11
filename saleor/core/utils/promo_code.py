@@ -43,9 +43,9 @@ def is_available_promo_code(code):
     return not (promo_code_is_gift_card(code) or promo_code_is_voucher(code))
 
 
-def promo_code_is_voucher(code):
+def promo_code_is_voucher(code: str) -> bool:
     return VoucherCode.objects.filter(code=code).exists()
 
 
-def promo_code_is_gift_card(code):
+def promo_code_is_gift_card(code: str) -> bool:
     return GiftCard.objects.filter(code=code).exists()

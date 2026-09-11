@@ -62,7 +62,7 @@ def _get_checkout_line_payload_data(line_info: "CheckoutLineInfo") -> dict[str, 
 def serialize_checkout_lines_for_tax_calculation(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-) -> list[dict]:
+) -> list[dict[str, object]]:
     charge_taxes = get_charge_taxes_for_checkout(checkout_info)
     return [
         {
@@ -86,7 +86,7 @@ def serialize_checkout_lines_for_tax_calculation(
 def generate_checkout_payload_for_tax_calculation(
     checkout_info: "CheckoutInfo",
     lines: list["CheckoutLineInfo"],
-):
+) -> str:
     checkout = checkout_info.checkout
     tax_configuration = checkout_info.tax_configuration
     prices_entered_with_tax = tax_configuration.prices_entered_with_tax

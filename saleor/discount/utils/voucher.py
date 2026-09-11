@@ -221,10 +221,10 @@ def attach_voucher_to_line_info(
             line_info.voucher_code = voucher_info.voucher_code
 
 
-def get_discounted_lines(
-    lines: Iterable["AnyLineInfo"], voucher_info: "VoucherInfo"
-) -> Iterable["AnyLineInfo"]:
-    discounted_lines: list[AnyLineInfo] = []
+def get_discounted_lines[LineInfoT: "AnyLineInfo"](
+    lines: Iterable[LineInfoT], voucher_info: "VoucherInfo"
+) -> Iterable[LineInfoT]:
+    discounted_lines: list[LineInfoT] = []
     if (
         voucher_info.product_pks
         or voucher_info.collection_pks

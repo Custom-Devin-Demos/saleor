@@ -23,7 +23,8 @@ class SaleorContext(HttpRequest):
     requestor: "App | User | None"
     request_time: datetime.datetime
 
-    def __init__(self, *args, **kwargs):
+    # Any: forwards arbitrary HttpRequest constructor arguments.
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         if "dataloaders" in kwargs:
             self.dataloaders = kwargs.pop("dataloaders")
         super().__init__(*args, **kwargs)

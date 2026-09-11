@@ -1,8 +1,10 @@
 import datetime
 import logging
 from decimal import Decimal
+from uuid import UUID
 
 import graphene
+from celery import Task
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -34,6 +36,10 @@ AUTOMATIC_COMPLETION_BATCH_SIZE = 20
 
 # Results in update time ~0.5s
 UPDATE_SEARCH_BATCH_SIZE = 100
+# celery-types declares queue as str, but Celery accepts None (default queue)
+AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME: str = (
+    settings.AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME  # type: ignore[assignment]
+)
 
 
 @app.task
@@ -137,7 +143,7 @@ def delete_expired_checkouts(
 
 
 @app.task
-def trigger_automatic_checkout_completion_task():
+def trigger_automatic_checkout_completion_task() -> None:
     """Trigger automatic checkout completion for eligible checkouts.
 
     This task:
@@ -197,26 +203,25 @@ def trigger_automatic_checkout_completion_task():
         domain = get_domain()
         for checkout in checkouts[:AUTOMATIC_COMPLETION_BATCH_SIZE]:
             automatic_checkout_completion_task.apply_async(
-                args=[checkout.pk],
+                args=(checkout.pk,),
                 kwargs={},
                 headers={"MessageGroupId": get_sqs_message_group_id(domain)},
             )
 
 
-# celery-types declares queue as str, but Celery accepts None (default queue)
-@app.task(  # type: ignore[call-overload]
-    queue=settings.AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME,
+@app.task(
+    queue=AUTOMATIC_CHECKOUT_COMPLETION_QUEUE_NAME,
     bind=True,
     default_retry_delay=60,
     retry_kwargs={"max_retries": 5},
 )
 @allow_writer()
 def automatic_checkout_completion_task(
-    self,
-    checkout_pk,
-    user_id=None,
-    app_id=None,
-):
+    self: "Task[[UUID, int | None, int | None], None]",
+    checkout_pk: UUID,
+    user_id: int | None = None,
+    app_id: int | None = None,
+) -> None:
     """Try to automatically complete the checkout.
 
     If any error is raised during the process, it will be caught and logged.
@@ -317,7 +322,7 @@ def automatic_checkout_completion_task(
     queue=settings.UPDATE_SEARCH_VECTOR_INDEX_QUEUE_NAME,  # type: ignore[arg-type]
     expires=settings.BEAT_UPDATE_SEARCH_EXPIRE_AFTER_SEC,
 )
-def update_checkouts_search_vector_task():
+def update_checkouts_search_vector_task() -> None:
     """Update search vectors for dirty checkouts by delegating to parallel batch tasks.
 
     This task orchestrates the search vector update process by:
@@ -350,7 +355,7 @@ def update_checkouts_search_vector_task():
 
 
 @app.task(expires=settings.BEAT_UPDATE_SEARCH_EXPIRE_AFTER_SEC)
-def update_checkouts_search_vector_task_batch_process(pks: list[int]):
+def update_checkouts_search_vector_task_batch_process(pks: list[int]) -> None:
     """Process a batch of checkouts to update their search vectors.
 
     This worker task handles a subset of checkouts by:

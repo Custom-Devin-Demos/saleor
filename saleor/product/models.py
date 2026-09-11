@@ -340,7 +340,7 @@ class ProductChannelListing(PublishableModel):
             BTreeIndex(fields=["discounted_price_amount"]),
         ]
 
-    def is_available_for_purchase(self):
+    def is_available_for_purchase(self) -> bool:
         return (
             self.available_for_purchase_at is not None
             and datetime.datetime.now(tz=datetime.UTC) >= self.available_for_purchase_at
