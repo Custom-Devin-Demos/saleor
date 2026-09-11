@@ -1,6 +1,8 @@
 from collections import defaultdict
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Union
+from uuid import UUID
 
 import graphene
 
@@ -18,11 +20,25 @@ if TYPE_CHECKING:
     from ..models import Voucher
 
 
+class _HasId(Protocol):
+    @property
+    def id(self) -> UUID: ...
+
+
+class _LineInfoWithDiscounts[DiscountT: (CheckoutLineDiscount, OrderLineDiscount)](
+    Protocol
+):
+    discounts: list[DiscountT]
+
+    @property
+    def line(self) -> _HasId: ...
+
+
 def update_discount(
     rule: Optional["PromotionRule"],
     voucher: Optional["Voucher"],
     discount_name: str,
-    translated_name: str,
+    translated_name: str | None,
     discount_reason: str,
     discount_amount: Decimal,
     value: Decimal,
@@ -33,7 +49,7 @@ def update_discount(
     ],
     updated_fields: list[str],
     voucher_code: str | None,
-):
+) -> None:
     if voucher and discount_to_update.voucher_id != voucher.id:
         discount_to_update.voucher_id = voucher.id
         updated_fields.append("voucher_id")
@@ -68,13 +84,20 @@ def update_discount(
         updated_fields.append("voucher_code")
 
 
-def update_line_info_cached_discounts(
-    lines_info, new_line_discounts, updated_discounts, line_discount_ids_to_remove
-):
+def update_line_info_cached_discounts[
+    DiscountT: (CheckoutLineDiscount, OrderLineDiscount)
+](
+    lines_info: Iterable[_LineInfoWithDiscounts[DiscountT]],
+    new_line_discounts: Iterable[DiscountT],
+    updated_discounts: Iterable[DiscountT],
+    line_discount_ids_to_remove: Iterable[UUID],
+) -> None:
     if not any([new_line_discounts, updated_discounts, line_discount_ids_to_remove]):
         return
 
-    line_id_line_discounts_map = defaultdict(list)
+    line_id_line_discounts_map: defaultdict[UUID | None, list[DiscountT]] = defaultdict(
+        list
+    )
     for line_discount in new_line_discounts:
         line_id_line_discounts_map[line_discount.line_id].append(line_discount)
 
@@ -97,7 +120,12 @@ def is_order_level_discount(discount: OrderDiscount) -> bool:
     ] or is_order_level_voucher(discount.voucher)
 
 
-def discount_info_for_logs(discounts):
+def discount_info_for_logs(
+    discounts: Iterable[
+        CheckoutDiscount | CheckoutLineDiscount | OrderDiscount | OrderLineDiscount
+    ],
+) -> list[dict[str, Any]]:
+    # heterogeneous log payload with nested optional dicts
     return [
         {
             "id": to_global_id_or_none(discount),

@@ -1,8 +1,9 @@
 import datetime
+from collections.abc import Callable
 from decimal import ROUND_HALF_UP, Decimal
 from functools import partial
-from typing import TYPE_CHECKING, Optional
-from uuid import uuid4
+from typing import TYPE_CHECKING, Any, Optional
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.contrib.postgres.indexes import BTreeIndex, GinIndex
@@ -43,14 +44,21 @@ class NotApplicable(ValueError):
     Minimum quantity will be available as the `min_checkout_items_quantity` attribute.
     """
 
-    def __init__(self, msg, min_spent=None, min_checkout_items_quantity=None):
+    def __init__(
+        self,
+        msg: str,
+        min_spent: Money | None = None,
+        min_checkout_items_quantity: int | None = None,
+    ) -> None:
         super().__init__(msg)
         self.min_spent = min_spent
         self.min_checkout_items_quantity = min_checkout_items_quantity
 
 
 class VoucherQueryset(models.QuerySet["Voucher"]):
-    def active(self, date, validate_usage_limit=True):
+    def active(
+        self, date: datetime.datetime, validate_usage_limit: bool = True
+    ) -> "VoucherQueryset":
         subquery = (
             VoucherCode.objects.filter(voucher_id=OuterRef("pk"))
             .order_by()
@@ -67,7 +75,12 @@ class VoucherQueryset(models.QuerySet["Voucher"]):
             )
         return self.filter(lookup)
 
-    def active_in_channel(self, date, channel_slug: str, validate_usage_limit=True):
+    def active_in_channel(
+        self,
+        date: datetime.datetime,
+        channel_slug: str,
+        validate_usage_limit: bool = True,
+    ) -> "VoucherQueryset":
         channels = Channel.objects.filter(
             slug=str(channel_slug), is_active=True
         ).values("id")
@@ -79,7 +92,7 @@ class VoucherQueryset(models.QuerySet["Voucher"]):
             Exists(channel_listings.filter(voucher_id=OuterRef("pk")))
         )
 
-    def expired(self, date):
+    def expired(self, date: datetime.datetime) -> "VoucherQueryset":
         subquery = (
             VoucherCode.objects.filter(voucher_id=OuterRef("pk"))
             .order_by()
@@ -132,16 +145,16 @@ class Voucher(ModelWithMetadata):
         ordering = ("name", "pk")
 
     @property
-    def code(self):
+    def code(self) -> str | None:
         # this function should be removed after field `code` will be deprecated
         code_instance = self.codes.last()
         return code_instance.code if code_instance else None
 
     @property
-    def promo_codes(self):
+    def promo_codes(self) -> list[str]:
         return list(self.codes.values_list("code", flat=True))
 
-    def get_discount(self, channel: Channel):
+    def get_discount(self, channel: Channel) -> Callable[[Money], Money]:
         """Return proper discount amount for given channel.
 
         It operates over all channel listings as assuming that we have prefetched them.
@@ -175,7 +188,7 @@ class Voucher(ModelWithMetadata):
             return price
         return price - after_discount
 
-    def validate_min_spent(self, value: Money, channel: Channel):
+    def validate_min_spent(self, value: Money, channel: Channel) -> None:
         voucher_channel_listing = self.channel_listings.filter(channel=channel).first()
         if not voucher_channel_listing:
             raise NotApplicable("This voucher is not assigned to this channel")
@@ -185,7 +198,7 @@ class Voucher(ModelWithMetadata):
             msg = f"This offer is only valid for orders over {target.amount} {target.currency}."
             raise NotApplicable(msg, min_spent=min_spent)
 
-    def validate_min_checkout_items_quantity(self, quantity):
+    def validate_min_checkout_items_quantity(self, quantity: int) -> None:
         min_checkout_items_quantity = self.min_checkout_items_quantity
         if min_checkout_items_quantity and min_checkout_items_quantity > quantity:
             msg = (
@@ -197,7 +210,7 @@ class Voucher(ModelWithMetadata):
                 min_checkout_items_quantity=min_checkout_items_quantity,
             )
 
-    def validate_once_per_customer(self, customer_email):
+    def validate_once_per_customer(self, customer_email: str) -> None:
         voucher_codes = self.codes.all()
         voucher_customer = VoucherCustomer.objects.filter(
             Exists(voucher_codes.filter(id=OuterRef("voucher_code_id"))),
@@ -207,7 +220,7 @@ class Voucher(ModelWithMetadata):
             msg = "This offer is valid only once per customer."
             raise NotApplicable(msg)
 
-    def validate_only_for_staff(self, customer: Optional["User"]):
+    def validate_only_for_staff(self, customer: Optional["User"]) -> None:
         if not self.only_for_staff:
             return
 
@@ -294,22 +307,22 @@ class VoucherTranslation(Translation):
         ordering = ("language_code", "voucher", "pk")
         unique_together = (("language_code", "voucher"),)
 
-    def get_translated_object_id(self):
+    def get_translated_object_id(self) -> tuple[str, int]:
         return "Voucher", self.voucher_id
 
-    def get_translated_keys(self):
+    def get_translated_keys(self) -> dict[str, str | None]:
         return {"name": self.name}
 
 
 class PromotionQueryset(models.QuerySet["Promotion"]):
-    def active(self, date=None):
+    def active(self, date: datetime.datetime | None = None) -> "PromotionQueryset":
         if date is None:
             date = timezone.now()
         return self.filter(
             Q(end_date__isnull=True) | Q(end_date__gte=date), start_date__lte=date
         )
 
-    def expired(self, date=None):
+    def expired(self, date: datetime.datetime | None = None) -> "PromotionQueryset":
         if date is None:
             date = timezone.now()
         return self.filter(end_date__lt=date, start_date__lt=date)
@@ -348,12 +361,14 @@ class Promotion(ModelWithMetadata):
             BTreeIndex(fields=["end_date"], name="end_date_idx"),
         ]
 
-    def is_active(self, date=None):
+    def is_active(self, date: datetime.datetime | None = None) -> bool:
         if date is None:
             date = datetime.datetime.now(tz=datetime.UTC)
-        return (not self.end_date or self.end_date >= date) and self.start_date <= date
+        return bool(
+            (not self.end_date or self.end_date >= date) and self.start_date <= date
+        )
 
-    def assign_old_sale_id(self):
+    def assign_old_sale_id(self) -> None:
         with connection.cursor() as cursor:
             cursor.execute("SELECT nextval('discount_promotion_old_sale_id_seq')")
             result = cursor.fetchone()
@@ -371,10 +386,11 @@ class PromotionTranslation(Translation):
     class Meta:
         unique_together = (("language_code", "promotion"),)
 
-    def get_translated_object_id(self):
+    def get_translated_object_id(self) -> tuple[str, UUID]:
         return "Promotion", self.promotion_id
 
-    def get_translated_keys(self):
+    def get_translated_keys(self) -> dict[str, Any]:
+        # description is a dynamic EditorJS JSON payload
         return {"name": self.name, "description": self.description}
 
 
@@ -416,7 +432,7 @@ class PromotionRule(models.Model):
     class Meta:
         ordering = ("name", "pk")
 
-    def get_discount(self, currency):
+    def get_discount(self, currency: str) -> Callable[[Money], Money]:
         if self.reward_value_type == RewardValueType.FIXED:
             discount_amount = Money(self.reward_value, currency)
             return partial(fixed_discount, discount=discount_amount)
@@ -429,7 +445,7 @@ class PromotionRule(models.Model):
         raise NotImplementedError("Unknown discount type")
 
     @staticmethod
-    def get_old_channel_listing_ids(qunatity):
+    def get_old_channel_listing_ids(qunatity: int) -> list[tuple[int]]:
         with connection.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -437,7 +453,8 @@ class PromotionRule(models.Model):
                 FROM generate_series(1, {qunatity})
                 """
             )
-            return cursor.fetchall()
+            rows: list[tuple[int]] = cursor.fetchall()
+            return rows
 
 
 class PromotionRule_Variants(models.Model):
@@ -462,10 +479,11 @@ class PromotionRuleTranslation(Translation):
     class Meta:
         unique_together = (("language_code", "promotion_rule"),)
 
-    def get_translated_object_id(self):
+    def get_translated_object_id(self) -> tuple[str, UUID]:
         return "PromotionRule", self.promotion_rule_id
 
-    def get_translated_keys(self):
+    def get_translated_keys(self) -> dict[str, Any]:
+        # description is a dynamic EditorJS JSON payload
         return {"name": self.name, "description": self.description}
 
 

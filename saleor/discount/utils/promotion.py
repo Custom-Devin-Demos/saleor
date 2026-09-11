@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict
 from decimal import Decimal
 from itertools import chain
-from typing import TYPE_CHECKING, NamedTuple, Union, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, Union, cast, overload
 from uuid import UUID
 
 import graphene
@@ -53,6 +53,7 @@ from ..models import (
     OrderLineDiscount,
     Promotion,
     PromotionRule,
+    PromotionRule_Variants,
 )
 from .shared import update_discount
 
@@ -67,23 +68,24 @@ CatalogueInfo = defaultdict[str, set[int | str]]
 CATALOGUE_FIELDS = ["categories", "collections", "products", "variants"]
 
 
-def prepare_promotion_discount_reason(promotion: Promotion):
+def prepare_promotion_discount_reason(promotion: Promotion) -> str:
     if promotion.old_sale_id:
         return f"Sale: {graphene.Node.to_global_id('Sale', promotion.old_sale_id)}"
     return f"Promotion: {graphene.Node.to_global_id('Promotion', promotion.id)}"
 
 
-def get_sale_id(promotion: "Promotion"):
-    return (
+def get_sale_id(promotion: "Promotion") -> str:
+    sale_id: str = (
         graphene.Node.to_global_id("Sale", promotion.old_sale_id)
         if promotion.old_sale_id
         else graphene.Node.to_global_id("Promotion", promotion.id)
     )
+    return sale_id
 
 
 def calculate_discounted_price_for_rules(
     *, price: Money, rules: Iterable["PromotionRule"], currency: str
-):
+) -> Money:
     """Calculate the discounted price for provided rules.
 
     The discounts from rules summed up and applied to the price.
@@ -124,7 +126,7 @@ def get_best_promotion_discount(
     shape:
         (rule_id_1, discount_amount_1)
     """
-    available_discounts = []
+    available_discounts: list[tuple[UUID, Callable[[Money], Money]]] = []
     for rule_id, discount in get_product_promotion_discounts(
         rules_info=rules_info_for_variant,
         channel=channel,
@@ -148,7 +150,7 @@ def get_product_promotion_discounts(
     *,
     rules_info: list[PromotionRuleInfo],
     channel: "Channel",
-) -> Iterator[tuple[UUID, Callable]]:
+) -> Iterator[tuple[UUID, Callable[[Money], Money]]]:
     """Return rule id, discount value for all rules applicable for given channel."""
     for rule_info in rules_info:
         try:
@@ -160,7 +162,7 @@ def get_product_promotion_discounts(
 def get_product_discount_on_promotion(
     rule_info: PromotionRuleInfo,
     channel: "Channel",
-) -> tuple[UUID, Callable]:
+) -> tuple[UUID, Callable[[Money], Money]]:
     """Return rule id, discount value if rule applied or raise NotApplicable."""
     if channel.id in rule_info.channel_ids:
         return rule_info.rule.id, rule_info.rule.get_discount(channel.currency_code)
@@ -213,19 +215,21 @@ def _get_rule_discount_amount(
         # calculate discount amount on overridden price
         discount = rule_info.rule.get_discount(channel.currency_code)
         discounted_price = discount(price_override)
-        discount_amount = (price_override - discounted_price).amount
+        discount_amount: Decimal = (price_override - discounted_price).amount
     else:
         discount_amount = variant_listing_promotion_rule.discount_amount
     return discount_amount * line.quantity
 
 
-def get_discount_name(rule: "PromotionRule", promotion: "Promotion"):
+def get_discount_name(rule: "PromotionRule", promotion: "Promotion") -> str:
     if promotion.name and rule.name:
         return f"{promotion.name}: {rule.name}"
     return rule.name or promotion.name
 
 
-def get_discount_translated_name(rule_info: "VariantPromotionRuleInfo"):
+def get_discount_translated_name(
+    rule_info: "VariantPromotionRuleInfo",
+) -> str | None:
     promotion_translation = rule_info.promotion_translation
     rule_translation = rule_info.rule_translation
     if promotion_translation and rule_translation:
@@ -245,7 +249,7 @@ def update_promotion_discount(
         "CheckoutLineDiscount", "CheckoutDiscount", "OrderLineDiscount", "OrderDiscount"
     ],
     updated_fields: list[str],
-):
+) -> None:
     discount_name = get_discount_name(rule, rule_info.promotion)
     translated_name = get_discount_translated_name(rule_info)
     reason = prepare_promotion_discount_reason(rule_info.promotion)
@@ -275,10 +279,10 @@ def get_best_rule(
     country: str,
     subtotal: Money,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> tuple[PromotionRule, Decimal, ProductVariantChannelListing | None] | None:
     class RuleDiscount(NamedTuple):
         rule: PromotionRule
-        discount_amount: Money
+        discount_amount: Decimal
         gift_listing: ProductVariantChannelListing | None
 
     currency_code = channel.currency_code
@@ -299,10 +303,10 @@ def get_best_rule(
             gift_rules, channel, country, database_connection_name
         )
         if best_gift_rule and gift_listing:
+            # gift listings are fetched with `price_amount__isnull=False`
+            gift_discount_amount = cast(Decimal, gift_listing.discounted_price_amount)
             rule_discounts.append(
-                RuleDiscount(
-                    best_gift_rule, gift_listing.discounted_price_amount, gift_listing
-                )
+                RuleDiscount(best_gift_rule, gift_discount_amount, gift_listing)
             )
 
     if not rule_discounts:
@@ -396,7 +400,7 @@ def _get_available_for_purchase_variant_ids(
     available_variant_ids: set[int],
     channel: "Channel",
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> set[int]:
     today = datetime.datetime.now(tz=datetime.UTC)
     variants = ProductVariant.objects.using(database_connection_name).filter(
         id__in=available_variant_ids
@@ -408,16 +412,16 @@ def _get_available_for_purchase_variant_ids(
         available_for_purchase_at__lte=today,
         channel_id=channel.id,
     )
-    available_variant_ids = variants.filter(
+    available_variant_ids_qs = variants.filter(
         Exists(product_listings.filter(product_id=OuterRef("product_id")))
     ).values_list("id", flat=True)
-    return set(available_variant_ids)
+    return set(available_variant_ids_qs)
 
 
 @allow_writer()
 def delete_gift_lines_qs(
     order_or_checkout: Checkout | Order,
-):
+) -> None:
     with transaction.atomic():
         if isinstance(order_or_checkout, Checkout):
             locked_checkout_lines_qs = checkout_lines_qs_select_for_update()
@@ -434,7 +438,7 @@ def delete_gift_lines_qs(
 def delete_gift_line(
     order_or_checkout: Checkout | Order,
     lines_info: list["CheckoutLineInfo"] | list["EditableOrderLineInfo"],
-):
+) -> None:
     if gift_line_infos := [line for line in lines_info if line.line.is_gift]:
         delete_gift_lines_qs(order_or_checkout)
         for gift_line_info in gift_line_infos:
@@ -443,7 +447,7 @@ def delete_gift_line(
 
 def _lock_order_or_checkout(
     order_or_checkout: Checkout | Order,
-):
+) -> None:
     if isinstance(order_or_checkout, Checkout):
         _checkout = (
             checkout_qs_select_for_update().filter(pk=order_or_checkout.pk).first()
@@ -452,11 +456,27 @@ def _lock_order_or_checkout(
         _order = order_qs_select_for_update().filter(pk=order_or_checkout.pk).first()
 
 
+@overload
+def create_gift_line(
+    order_or_checkout: Checkout,
+    gift_listing: "ProductVariantChannelListing",
+    line_discount_data: DiscountInfo,
+) -> CheckoutLine: ...
+
+
+@overload
+def create_gift_line(
+    order_or_checkout: Order,
+    gift_listing: "ProductVariantChannelListing",
+    line_discount_data: DiscountInfo,
+) -> "OrderLine": ...
+
+
 def create_gift_line(
     order_or_checkout: Checkout | Order,
     gift_listing: "ProductVariantChannelListing",
     line_discount_data: DiscountInfo,
-):
+) -> Union[CheckoutLine, "OrderLine"]:
     defaults = _get_defaults_for_gift_line(
         order_or_checkout, gift_listing, line_discount_data
     )
@@ -466,7 +486,7 @@ def create_gift_line(
             is_gift=True, defaults=defaults
         )
     if not created:
-        fields_to_update = []
+        fields_to_update: list[str] = []
         for field, value in defaults.items():
             if getattr(line, field) != value:
                 setattr(line, field, value)
@@ -481,7 +501,8 @@ def _get_defaults_for_gift_line(
     order_or_checkout: Checkout | Order,
     gift_listing: "ProductVariantChannelListing",
     line_discount_data: DiscountInfo,
-):
+) -> dict[str, Any]:
+    # `Any`: heterogeneous model field defaults passed to `get_or_create`
     variant_id = gift_listing.variant_id
     if isinstance(order_or_checkout, Checkout):
         return {
@@ -566,14 +587,14 @@ def get_variants_to_promotion_rules_map(
 def fetch_promotion_rules_for_checkout_or_order(
     instance: Union["Checkout", "Order"],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> list[PromotionRule]:
     from ...graphql.discount.utils import PredicateObjectType, filter_qs_by_predicate
 
     with allow_writer():
         # TODO: channel should be loaded using dataloader
         currency = instance.channel.currency_code
 
-    applicable_rules = []
+    applicable_rules: list[PromotionRule] = []
     promotions = Promotion.objects.active()
     rules = (
         PromotionRule.objects.using(database_connection_name)
@@ -608,8 +629,10 @@ def fetch_promotion_rules_for_checkout_or_order(
     return applicable_rules
 
 
-def _get_rule_to_channel_ids_map(rules: QuerySet):
-    rule_to_channel_ids_map = defaultdict(list)
+def _get_rule_to_channel_ids_map(
+    rules: QuerySet[PromotionRule],
+) -> defaultdict[UUID, list[int]]:
+    rule_to_channel_ids_map: defaultdict[UUID, list[int]] = defaultdict(list)
     PromotionRuleChannel = PromotionRule.channels.through
     promotion_rule_channels = PromotionRuleChannel.objects.using(
         settings.DATABASE_CONNECTION_REPLICA_NAME
@@ -621,7 +644,9 @@ def _get_rule_to_channel_ids_map(rules: QuerySet):
     return rule_to_channel_ids_map
 
 
-def get_current_products_for_rules(rules: "QuerySet[PromotionRule]"):
+def get_current_products_for_rules(
+    rules: "QuerySet[PromotionRule]",
+) -> QuerySet[Product]:
     """Get currently assigned products to promotions.
 
     Collect all products for variants that are assigned to promotion rules.
@@ -636,7 +661,11 @@ def get_current_products_for_rules(rules: "QuerySet[PromotionRule]"):
     return Product.objects.filter(Exists(variants.filter(product_id=OuterRef("id"))))
 
 
-def _create_new_rules(rules_to_add, variants_lock, rules_lock):
+def _create_new_rules(
+    rules_to_add: list[PromotionRule_Variants],
+    variants_lock: tuple[int, ...],
+    rules_lock: tuple[UUID, ...],
+) -> list[PromotionRule_Variants]:
     # base on what locks returned, filter out rules and variants that weren't locked
     rules_to_add_batch = [
         rv
@@ -644,14 +673,14 @@ def _create_new_rules(rules_to_add, variants_lock, rules_lock):
         if rv.promotionrule_id in rules_lock and rv.productvariant_id in variants_lock
     ]
 
-    return PromotionRule.variants.through.objects.bulk_create(
+    return PromotionRule_Variants.objects.bulk_create(
         rules_to_add_batch, ignore_conflicts=True
     )
 
 
 def update_rule_variant_relation(
-    rules: QuerySet[PromotionRule], new_rules_variants: list
-):
+    rules: QuerySet[PromotionRule], new_rules_variants: list[PromotionRule_Variants]
+) -> list[PromotionRule_Variants]:
     """Update PromotionRule - ProductVariant relation.
 
     Deletes relations, which are not valid anymore.
@@ -715,6 +744,30 @@ def update_rule_variant_relation(
         return _create_new_rules(rules_variants_to_add, variants_lock, rules_lock)
 
 
+@overload
+def create_discount_objects_for_order_promotions(
+    order_or_checkout: Checkout,
+    lines_info: list["CheckoutLineInfo"],
+    subtotal: Money,
+    channel: "Channel",
+    country: str,
+    *,
+    database_connection_name: str = ...,
+) -> tuple[bool, CheckoutDiscount | None, datetime.datetime | None]: ...
+
+
+@overload
+def create_discount_objects_for_order_promotions(
+    order_or_checkout: Order,
+    lines_info: list["EditableOrderLineInfo"],
+    subtotal: Money,
+    channel: "Channel",
+    country: str,
+    *,
+    database_connection_name: str = ...,
+) -> tuple[bool, OrderDiscount | None, datetime.datetime | None]: ...
+
+
 def create_discount_objects_for_order_promotions(
     order_or_checkout: Checkout | Order,
     lines_info: list["EditableOrderLineInfo"] | list["CheckoutLineInfo"],
@@ -723,14 +776,14 @@ def create_discount_objects_for_order_promotions(
     country: str,
     *,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> tuple[bool, CheckoutDiscount | OrderDiscount | None, datetime.datetime | None]:
     """Create discount object for order promotions.
 
     If the best promotion is gift promotion, new gift line is created.
     """
     gift_promotion_applied = False
-    discount_object = None
-    promotion_end_date = None
+    discount_object: CheckoutDiscount | OrderDiscount | None = None
+    promotion_end_date: datetime.datetime | None = None
     rules = fetch_promotion_rules_for_checkout_or_order(
         order_or_checkout, database_connection_name
     )
@@ -760,7 +813,12 @@ def create_discount_objects_for_order_promotions(
     )
     # gift rule has empty reward_value and reward_value_type
     value_type = best_rule.reward_value_type or RewardValueType.FIXED
-    amount_value = gift_listing.price_amount if gift_listing else best_discount_amount
+    # gift listings are fetched with `price_amount__isnull=False`
+    amount_value = (
+        cast(Decimal, gift_listing.price_amount)
+        if gift_listing
+        else best_discount_amount
+    )
     value = best_rule.reward_value or amount_value
     line_discount = DiscountInfo(
         type=DiscountType.ORDER_PROMOTION,
@@ -800,7 +858,7 @@ def _handle_order_promotion(
     lines_info: list["EditableOrderLineInfo"] | list["CheckoutLineInfo"],
     line_discount_data: DiscountInfo,
     rule_info: VariantPromotionRuleInfo,
-):
+) -> CheckoutDiscount | OrderDiscount:
     with transaction.atomic():
         # As we do not have the unique constraint on order/checkout discount model,
         # we need to lock the order/checkout to avoid creating duplicate promotion
@@ -837,7 +895,7 @@ def _handle_gift_reward(
     channel: "Channel",
     line_discount_data: DiscountInfo,
     rule_info: VariantPromotionRuleInfo,
-):
+) -> None:
     discount_model = (
         CheckoutLineDiscount
         if isinstance(order_or_checkout, Checkout)
@@ -859,7 +917,7 @@ def _handle_gift_reward(
         )
 
     if not discount_created:
-        fields_to_update = []
+        fields_to_update: list[str] = []
         if line_discount.line_id != line.id:
             line_discount.line = line
             fields_to_update.append("line_id")
@@ -882,7 +940,8 @@ def _handle_gift_reward(
         lines_info.remove(line_info)  # type: ignore[arg-type]
 
     variant = gift_listing.variant
-    init_values = {
+    # `Any`: kwargs differ between CheckoutLineInfo and EditableOrderLineInfo
+    init_values: dict[str, Any] = {
         "line": line,
         "variant": variant,
         "product": variant.product,
@@ -922,7 +981,9 @@ def get_active_catalogue_promotion_rules(
     return rules
 
 
-def mark_active_catalogue_promotion_rules_as_dirty(channel_ids: Iterable[int]):
+def mark_active_catalogue_promotion_rules_as_dirty(
+    channel_ids: Iterable[int],
+) -> None:
     """Force promotion rule to recalculate.
 
     The rules which are marked as dirty, will be recalculated in background.
@@ -951,7 +1012,7 @@ def mark_active_catalogue_promotion_rules_as_dirty(channel_ids: Iterable[int]):
         )
 
 
-def mark_catalogue_promotion_rules_as_dirty(promotion_pks: Iterable[UUID]):
+def mark_catalogue_promotion_rules_as_dirty(promotion_pks: Iterable[UUID]) -> None:
     """Mark rules for promotions as dirty.
 
     The rules which are marked as dirty, will be recalculated in background.

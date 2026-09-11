@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from django.conf import settings
@@ -15,9 +15,10 @@ from ...core.taxes import zero_money
 from ...order.base_calculations import base_order_subtotal
 from ...order.lock_objects import order_qs_select_for_update
 from ...order.models import Order, OrderLine
-from .. import DiscountType
+from ...product.models import ProductVariantChannelListing
+from .. import DiscountType, DiscountValueType
 from ..interface import VariantPromotionRuleInfo
-from ..models import DiscountValueType, OrderLineDiscount
+from ..models import OrderLineDiscount
 from .manual_discount import apply_discount_to_value
 from .promotion import (
     _get_rule_discount_amount,
@@ -42,7 +43,8 @@ def create_order_line_discount_objects(
         list[OrderLineDiscount],
         list[OrderLineDiscount],
         list[str],
-    ],
+    ]
+    | None,
 ) -> None | list["EditableOrderLineInfo"]:
     if not discount_data or not lines_info:
         return None
@@ -102,7 +104,7 @@ def update_catalogue_promotion_discount_amount_for_order(
     line: OrderLine,
     quantity: int,
     currency: str,
-):
+) -> None:
     """Update catalogue promotion discount amount.
 
     The discount amount must be updated when:
@@ -123,7 +125,7 @@ def update_catalogue_promotion_discount_amount_for_order(
 
 def update_unit_discount_data_on_order_line(
     line: OrderLine, discounts: list[OrderLineDiscount]
-):
+) -> None:
     unit_discount_reason = (
         "; ".join([discount.reason for discount in discounts if discount.reason])
         or None
@@ -157,7 +159,7 @@ def update_unit_discount_data_on_order_line(
 
 def update_unit_discount_data_on_order_lines_info(
     lines_info: list["EditableOrderLineInfo"],
-):
+) -> None:
     for line_info in lines_info:
         line = line_info.line
         update_unit_discount_data_on_order_line(line, line_info.discounts)
@@ -165,9 +167,9 @@ def update_unit_discount_data_on_order_lines_info(
 
 def handle_order_promotion(
     order: "Order",
-    lines_info,
+    lines_info: list["EditableOrderLineInfo"],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     create_order_discount_objects_for_order_promotions(
         order, lines_info, database_connection_name=database_connection_name
     )
@@ -182,7 +184,7 @@ def create_order_discount_objects_for_order_promotions(
     order: "Order",
     lines_info: list["EditableOrderLineInfo"],
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
-):
+) -> None:
     from ...order.utils import get_order_country
 
     # If voucher is set or manual discount applied, then skip order promotions
@@ -215,19 +217,21 @@ def create_order_discount_objects_for_order_promotions(
         return
 
 
-def _clear_prefetched_order_discounts(order):
+def _clear_prefetched_order_discounts(order: Order) -> None:
     if hasattr(order, "_prefetched_objects_cache"):
         order._prefetched_objects_cache.pop("discounts", None)
 
 
-def _set_order_base_prices(order: Order, lines_info: list["EditableOrderLineInfo"]):
+def _set_order_base_prices(
+    order: Order, lines_info: list["EditableOrderLineInfo"]
+) -> None:
     """Set base order prices that includes only catalogue discounts."""
     lines = [line_info.line for line_info in lines_info]
     subtotal = base_order_subtotal(order, lines)
     shipping_price = order.undiscounted_base_shipping_price
     total = subtotal + shipping_price
 
-    update_fields = []
+    update_fields: list[str] = []
     if order.subtotal != TaxedMoney(net=subtotal, gross=subtotal):
         order.subtotal = TaxedMoney(net=subtotal, gross=subtotal)
         update_fields.extend(["subtotal_net_amount", "subtotal_gross_amount"])
@@ -244,7 +248,7 @@ def _set_order_base_prices(order: Order, lines_info: list["EditableOrderLineInfo
 def _clear_order_discount(
     order_or_checkout: Order,
     lines_info: list["EditableOrderLineInfo"],
-):
+) -> None:
     with transaction.atomic():
         delete_gift_line(order_or_checkout, lines_info)
         order_or_checkout.discounts.filter(type=DiscountType.ORDER_PROMOTION).delete()
@@ -252,7 +256,7 @@ def _clear_order_discount(
 
 def _create_order_line_discount_for_catalogue_promotion(
     line: OrderLine, rule_info: VariantPromotionRuleInfo, channel: Channel
-):
+) -> OrderLineDiscount:
     rule = rule_info.rule
     if rule.reward_value_type is None or rule.reward_value is None:
         raise ValueError(
@@ -302,7 +306,7 @@ def create_order_line_discount_objects_for_catalogue_promotions(
 
 def refresh_order_line_discount_objects_for_catalogue_promotions(
     lines_info: list["EditableOrderLineInfo"],
-):
+) -> None:
     discount_data = prepare_order_line_discount_objects_for_catalogue_promotions(
         lines_info
     )
@@ -310,7 +314,17 @@ def refresh_order_line_discount_objects_for_catalogue_promotions(
     _update_base_unit_price_amount_for_catalogue_promotion(lines_info)
 
 
-def prepare_order_line_discount_objects_for_catalogue_promotions(lines_info):
+def prepare_order_line_discount_objects_for_catalogue_promotions(
+    lines_info: list["EditableOrderLineInfo"],
+) -> (
+    tuple[
+        list[OrderLineDiscount],
+        list[OrderLineDiscount],
+        list[OrderLineDiscount],
+        list[str],
+    ]
+    | None
+):
     line_discounts_to_create: list[OrderLineDiscount] = []
     line_discounts_to_update: list[OrderLineDiscount] = []
     line_discounts_to_remove: list[OrderLineDiscount] = []
@@ -340,9 +354,9 @@ def prepare_order_line_discount_objects_for_catalogue_promotions(lines_info):
             continue
 
         # check if the line price is discounted by catalogue promotion
-        discounted_line = is_discounted_line_by_catalogue_promotion(
-            line_info.channel_listing
-        )
+        # editable order lines are fetched together with their channel listing
+        channel_listing = cast(ProductVariantChannelListing, line_info.channel_listing)
+        discounted_line = is_discounted_line_by_catalogue_promotion(channel_listing)
 
         # delete all existing discounts if the line is not discounted or it is a gift
         if not discounted_line or line.is_gift:
@@ -383,7 +397,7 @@ def prepare_order_line_discount_objects_for_catalogue_promotions(lines_info):
 
 def _update_base_unit_price_amount_for_catalogue_promotion(
     lines_info: list["EditableOrderLineInfo"],
-):
+) -> None:
     for line_info in lines_info:
         line = line_info.line
         base_unit_price = line.undiscounted_base_unit_price_amount
@@ -393,7 +407,9 @@ def _update_base_unit_price_amount_for_catalogue_promotion(
         line.base_unit_price_amount = max(base_unit_price, Decimal(0))
 
 
-def refresh_manual_line_discount_object(lines_info):
+def refresh_manual_line_discount_object(
+    lines_info: list["EditableOrderLineInfo"],
+) -> None:
     discount_to_update: list[OrderLineDiscount] = []
     for line_info in lines_info:
         manual_discount = line_info.get_manual_line_discount()

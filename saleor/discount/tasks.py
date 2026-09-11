@@ -1,6 +1,7 @@
 import datetime
 from collections import Counter, defaultdict
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import graphene
 from celery.utils.log import get_task_logger
@@ -36,7 +37,7 @@ from .models import (
 from .utils.promotion import mark_catalogue_promotion_rules_as_dirty
 
 if TYPE_CHECKING:
-    from uuid import UUID
+    from .models import PromotionQueryset
 
 # Results in update time ~0.1s
 EXPIRED_RULES_BATCH_SIZE = 5000
@@ -46,9 +47,10 @@ task_logger = get_task_logger(__name__)
 PROMOTION_TOGGLE_BATCH_SIZE = 100
 
 
-@app.task
+# celery ships no type hints; the untyped-decorator error is reported only under --strict
+@app.task  # type: ignore[misc, unused-ignore]
 @allow_writer()
-def handle_promotion_toggle():
+def handle_promotion_toggle() -> None:
     """Send the notification about promotion toggle and recalculate discounted prices.
 
     Send the notifications about starting or ending promotions and call recalculation
@@ -56,16 +58,18 @@ def handle_promotion_toggle():
     """
     manager = get_plugins_manager(allow_replica=False)
 
-    starting_promotions = get_starting_promotions(batch=True)
-    ending_promotions = get_ending_promotions(batch=True)
+    starting_promotions_qs = get_starting_promotions(batch=True)
+    ending_promotions_qs = get_ending_promotions(batch=True)
     promotion_ids = [
-        promotion.id for promotion in starting_promotions | ending_promotions
+        promotion.id for promotion in starting_promotions_qs | ending_promotions_qs
     ][:PROMOTION_TOGGLE_BATCH_SIZE]
     starting_promotions = [
-        promotion for promotion in starting_promotions if promotion.id in promotion_ids
+        promotion
+        for promotion in starting_promotions_qs
+        if promotion.id in promotion_ids
     ]
     ending_promotions = [
-        promotion for promotion in ending_promotions if promotion.id in promotion_ids
+        promotion for promotion in ending_promotions_qs if promotion.id in promotion_ids
     ]
     promotions = Promotion.objects.filter(id__in=promotion_ids).all()
     promotion_id_to_variants, product_ids = fetch_promotion_variants_and_product_ids(
@@ -133,7 +137,7 @@ def handle_promotion_toggle():
     )
 
 
-def get_starting_promotions(batch=False):
+def get_starting_promotions(batch: bool = False) -> "PromotionQueryset":
     """Return promotions for which the notify about starting should be sent.
 
     The notification should be sent for promotions for which the start date has passed
@@ -153,7 +157,7 @@ def get_starting_promotions(batch=False):
     return promotions
 
 
-def get_ending_promotions(batch=False):
+def get_ending_promotions(batch: bool = False) -> "PromotionQueryset":
     """Return promotions for which the notify about ending should be sent.
 
     The notification should be sent for promotions for which the end date has passed
@@ -173,9 +177,11 @@ def get_ending_promotions(batch=False):
     return promotions
 
 
-def fetch_promotion_variants_and_product_ids(promotions: "QuerySet[Promotion]"):
+def fetch_promotion_variants_and_product_ids(
+    promotions: "QuerySet[Promotion]",
+) -> tuple[dict[UUID, QuerySet[ProductVariant]], list[int]]:
     """Fetch products that are included in the given promotions."""
-    promotion_id_to_variants: dict[UUID, QuerySet] = defaultdict(
+    promotion_id_to_variants: dict[UUID, QuerySet[ProductVariant]] = defaultdict(
         lambda: ProductVariant.objects.none()
     )
     variants = ProductVariant.objects.none()
@@ -192,9 +198,10 @@ def fetch_promotion_variants_and_product_ids(promotions: "QuerySet[Promotion]"):
     return promotion_id_to_variants, list(products.values_list("id", flat=True))
 
 
-@app.task
+# celery ships no type hints; the untyped-decorator error is reported only under --strict
+@app.task  # type: ignore[misc, unused-ignore]
 @allow_writer()
-def clear_promotion_rule_variants_task():
+def clear_promotion_rule_variants_task() -> None:
     """Clear all promotion rule variants."""
     promotions = Promotion.objects.using(
         settings.DATABASE_CONNECTION_REPLICA_NAME
@@ -216,11 +223,12 @@ def clear_promotion_rule_variants_task():
         clear_promotion_rule_variants_task.delay()
 
 
-@app.task
+# celery ships no type hints; the untyped-decorator error is reported only under --strict
+@app.task  # type: ignore[misc, unused-ignore]
 @allow_writer()
 def release_voucher_code_usage_of_draft_orders(
     voucher_codes_with_emails: list[tuple[str, str]],
-):
+) -> None:
     voucher_codes = [code for code, _ in voucher_codes_with_emails]
     if not voucher_codes:
         return
@@ -249,7 +257,7 @@ def release_voucher_code_usage_of_draft_orders(
     VoucherCustomer.objects.filter(lookup).delete()
 
 
-def decrease_voucher_code_usage_of_draft_orders(channel_id: int):
+def decrease_voucher_code_usage_of_draft_orders(channel_id: int) -> None:
     codes = (
         Order.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME)
         .filter(
@@ -265,9 +273,12 @@ def decrease_voucher_code_usage_of_draft_orders(channel_id: int):
     decrease_voucher_codes_usage_task.delay(list(voucher_code_ids), list(codes))
 
 
-@app.task
+# celery ships no type hints; the untyped-decorator error is reported only under --strict
+@app.task  # type: ignore[misc, unused-ignore]
 @allow_writer()
-def decrease_voucher_codes_usage_task(voucher_code_ids, codes):
+def decrease_voucher_codes_usage_task(
+    voucher_code_ids: list[int], codes: list[str]
+) -> None:
     # Batch of size 1000 takes ~1sec and consumes ~20mb at peak
     BATCH_SIZE = 1000
     ids = voucher_code_ids[:BATCH_SIZE]
@@ -290,7 +301,7 @@ def decrease_voucher_codes_usage_task(voucher_code_ids, codes):
             decrease_voucher_codes_usage_task.delay(remaining_ids, codes)
 
 
-def disconnect_voucher_codes_from_draft_orders(channel_id: int):
+def disconnect_voucher_codes_from_draft_orders(channel_id: int) -> None:
     order_ids = (
         Order.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME)
         .filter(
@@ -301,9 +312,10 @@ def disconnect_voucher_codes_from_draft_orders(channel_id: int):
     disconnect_voucher_codes_from_draft_orders_task.delay(list(order_ids))
 
 
-@app.task
+# celery ships no type hints; the untyped-decorator error is reported only under --strict
+@app.task  # type: ignore[misc, unused-ignore]
 @allow_writer()
-def disconnect_voucher_codes_from_draft_orders_task(order_ids):
+def disconnect_voucher_codes_from_draft_orders_task(order_ids: list[UUID]) -> None:
     # Batch of size 1000 takes ~1sec and consumes ~20mb at peak
     BATCH_SIZE = 1000
     ids = order_ids[:BATCH_SIZE]
@@ -324,11 +336,12 @@ def disconnect_voucher_codes_from_draft_orders_task(order_ids):
             disconnect_voucher_codes_from_draft_orders_task.delay(remaining_ids)
 
 
-@app.task(
+# celery ships no type hints; the untyped-decorator error is reported only under --strict
+@app.task(  # type: ignore[misc, unused-ignore]
     name="saleor.discount.migrations.tasks.saleor3_17.update_discounted_prices_task"
 )
 @allow_writer()
-def update_discounted_prices_task():
+def update_discounted_prices_task() -> None:
     """Recalculate discounted prices during sale to promotion migration."""
     # WARNING: this function is run during `0047_migrate_sales_to_promotions` migration,
     # so please be careful while updating.
@@ -361,11 +374,12 @@ def update_discounted_prices_task():
         update_discounted_prices_for_promotion(products)
 
 
-@app.task(
+# celery ships no type hints; the untyped-decorator error is reported only under --strict
+@app.task(  # type: ignore[misc, unused-ignore]
     name="saleor.discount.migrations.tasks.saleor3_17.set_promotion_rule_variants"
 )
 @allow_writer()
-def set_promotion_rule_variants_task(start_id=None):
+def set_promotion_rule_variants_task(start_id: UUID | None = None) -> None:
     # WARNING: this function is run during `0067_fulfill_promotionrule_variants`
     # migration, be careful while updating.
     # This task can be deleted after we introduce a different process for calculating
